@@ -2,12 +2,14 @@
 
 # harview
 
-HTTP Archive (HAR) Viewer on the terminal written in Rust
+HTTP Archive (HAR) Viewer on the terminal, written in Rust
 
 *This tool is still under development. Please note that specifications are subject to change without notice.*
 
 </div>
 
+> [!NOTE]
+> This is a fork of the original `harview` tool. I am building upon the original repository to add new features and improvements.
 
 ## About
 
@@ -15,29 +17,34 @@ HTTP Archive (HAR) Viewer on the terminal written in Rust
 
 The goal of this tool is not to provide in-depth analysis capabilities like DevTool, but to provide the ability to browse HAR files with a lightweight UI like an easy-to-use pager for those familiar with the command line interface.
 
+## New Features
+
+This fork includes several enhancements over the original:
+
+-   **Mouse Support**:
+    -   **Split-Pane Scrolling**: Independent scrolling for the request list (top) and details pane (bottom) based on mouse hover.
+    -   **Focus Highlighting**: The active pane is highlighted with a green border.
+    -   **Clickable Tabs**: Switch between Headers, Cookies, Request, and Response by clicking the tabs.
+-   **External Viewer Integration**: Open JSON bodies in `fx` for advanced exploration (requires `fx`).
+-   **Enhanced UI**:
+    -   **Timestamp Column**: Added to the request list.
+    -   **Syntaxt Highlighting**: For JSON, HTML, XML, JS, and CSS.
+    -   **Pretty Printing**: Auto-formatting for JSON and HTML.
+    -   **Scrolling**: Proper scrolling support for Headers and Cookies views.
+
+## Prerequisites
+
+To use the external viewer feature, you need to have `fx` installed on your system.
+
+```sh
+npm install -g fx
+```
+
 ## Usage
 
 ### Export HAR files from Browsers
 
 Open your web browser's DevTools and export the HAR file.
-It supports the HAR format, which can be exported in the following browsers:
-
-- Firefox
-- Chromium based browsers
-
-**Firefox**:
-    
-1. Open DevTool (type `F12` or `Ctrl-Shift-I`)
-2. Open *Network* tab and select *Save All as HAR* from context menu
-
-> [Network request list - Firefox Source Docs](https://firefox-source-docs.mozilla.org/devtools-user/network_monitor/request_list/index.html)
-
-**Chromium**:
-
-1. Open DevTool (type `F12` or `Ctrl-Shift-I`)
-2. Click *Export HAR* below the tab bar
-
-> [Network features reference - Chrome DevTools](https://developer.chrome.com/docs/devtools/network/reference)
 
 ### Use *harview* TUI
 
@@ -46,14 +53,33 @@ To use harview, specify the path of the HAR file as the first argument. Once the
 ```sh
 harview example.com.har
 ```
-TUI can be controlled with the following keys:
+
+### Controls
+
+**Keyboard Shortcuts**
 
 | Key | Action |
 |-----|---------|
-| `k` / `j` | Move the focus up / down |
-| `u` /  `d` | Move the focus up / down more fast |
-| `1` - `4` | Switch preview widget tab |
+| `k` / `Up` | Move focus up (List) |
+| `j` / `Down` | Move focus down (List) |
+| `u` | Move focus up by 3 |
+| `d` | Move focus down by 3 |
+| `g` / `Home` | Go to top |
+| `G` / `End` | Go to bottom |
+| `Shift+Up` / `PageUp` | Scroll Up (Details/Body) |
+| `Shift+Down` / `PageDown` | Scroll Down (Details/Body) |
+| `1` - `4` | Switch tab (Headers, Cookies, Request, Response) |
+| `Left` / `Right` | Cycle through tabs |
+| `Shift+j` / `J` | Open current JSON body in `fx` |
 | `q` or `Ctrl-C` | Quit application |
+
+**Mouse Actions**
+
+| Action | Description |
+|--------|-------------|
+| **Hover** | Automatically focuses the top (List) or bottom (Details) pane. |
+| **Scroll Wheel** | Scrolls the focused pane. |
+| **Left Click** | Click on tabs (`[1] Headers`, etc.) to switch views. |
 
 ## Installation
 

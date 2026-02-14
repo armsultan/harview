@@ -1,6 +1,20 @@
+use base64::prelude::*;
 use mime;
 use ratatui::{prelude::*, widgets::*};
 use url;
+use std::process::Command;
+use std::io::Write;
+use tempfile::NamedTempFile;
+use crossterm::{
+    execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActiveFocus {
+    Table,
+    Preview,
+}
 
 #[derive(Debug)]
 pub struct App {
@@ -9,6 +23,10 @@ pub struct App {
     pub har: Har,
     //pub preview_widget_state: PreviewWidetState,
     pub tabbar_state: TabBarState,
+    pub scroll: u16,
+    pub should_redraw: bool,
+    pub window_size: Rect,
+    pub active_focus: ActiveFocus,
 }
 
 impl App {
@@ -18,6 +36,10 @@ impl App {
             index: 0,
             tabbar_state: TabBarState::Headers,
             har: har,
+            scroll: 0,
+            should_redraw: false,
+            window_size: Rect::default(),
+            active_focus: ActiveFocus::Table,
         }
     }
 
@@ -40,14 +62,53 @@ impl App {
             max - 1
         } else {
             added as usize
-        }
+        };
+        self.scroll = 0;
     }
     pub fn update_index_first(&mut self) {
         self.index = 0;
+        self.scroll = 0;
     }
 
     pub fn update_index_last(&mut self) {
-        self.index = self.har.log.entries.len() - 1
+        self.index = self.har.log.entries.len() - 1;
+        self.scroll = 0;
+    }
+
+    pub fn on_up(&mut self) {
+        if self.scroll > 0 {
+            self.scroll -= 1;
+        }
+    }
+
+    pub fn on_down(&mut self) {
+        self.scroll += 1;
+    }
+
+    pub fn on_page_up(&mut self) {
+        if self.scroll > 10 {
+            self.scroll -= 10;
+        } else {
+            self.scroll = 0;
+        }
+    }
+
+    pub fn on_page_down(&mut self) {
+        self.scroll += 10;
+    }
+
+    pub fn next_tab(&mut self) {
+        let current_index = self.tabbar_state.to_index();
+        let next_index = (current_index + 1) % 4;
+        self.tabbar_state = TabBarState::from_index(next_index).unwrap();
+        self.scroll = 0;
+    }
+
+    pub fn prev_tab(&mut self) {
+        let current_index = self.tabbar_state.to_index();
+        let prev_index = if current_index == 0 { 3 } else { current_index - 1 };
+        self.tabbar_state = TabBarState::from_index(prev_index).unwrap();
+        self.scroll = 0;
     }
 
     //pub fn set_preview_widget_state(&mut self, state: &PreviewWidetState) {
@@ -55,6 +116,44 @@ impl App {
     //}
     pub fn set_tabbar_state(&mut self, state: &TabBarState) {
         self.tabbar_state = state.clone();
+        self.scroll = 0;
+    }
+
+    pub fn open_in_fx(&mut self) {
+        let body = match self.tabbar_state {
+            TabBarState::Request => self.har.to_request_body(self.get_index()),
+            TabBarState::Response => self.har.to_response_body(self.get_index()),
+            _ => None,
+        };
+
+        if let Some(content) = body {
+            // Suspend TUI
+            // Suspend TUI
+            disable_raw_mode().unwrap();
+            execute!(std::io::stderr(), LeaveAlternateScreen).unwrap();
+
+            // Write content to temp file
+            let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
+            write!(temp_file, "{}", content).expect("Failed to write to temp file");
+            temp_file.flush().expect("Failed to flush temp file");
+            let temp_path = temp_file.path().to_owned();
+
+            println!("Opening fx with {}...", temp_path.display());
+
+            // Run fx with file path
+            let mut child = Command::new("fx")
+                .arg(temp_path)
+                .spawn()
+                .expect("Failed to start fx");
+
+            let _ = child.wait();
+
+            // Restore TUI
+            // Restore TUI
+            execute!(std::io::stderr(), EnterAlternateScreen).unwrap();
+            enable_raw_mode().unwrap();
+            self.should_redraw = true;
+        }
     }
 
     pub fn quit(&mut self) {
@@ -94,6 +193,7 @@ impl Har {
                         .clone()
                         .unwrap_or("".to_string()),
                     size: entry.response.content.size,
+                    timestamp: entry.started_date_time.clone(),
                 }
             })
             .collect()
@@ -157,6 +257,32 @@ impl Har {
 
         None
     }
+
+    pub fn to_request_body(&self, index: usize) -> Option<String> {
+        if let Some(entry) = self.log.entries.get(index) {
+            if let Some(post_data) = &entry.request.post_data {
+                return Some(post_data.text.clone());
+            }
+        }
+        None
+    }
+
+    pub fn to_response_body(&self, index: usize) -> Option<String> {
+        if let Some(entry) = self.log.entries.get(index) {
+            if let Some(text) = &entry.response.content.text {
+                if let Some(encoding) = &entry.response.content.encoding {
+                    if encoding.eq_ignore_ascii_case("base64") {
+                        match BASE64_STANDARD.decode(text) {
+                            Ok(decoded) => return Some(String::from_utf8_lossy(&decoded).to_string()),
+                            Err(_) => return Some(format!("Error decoding base64: {}", text)),
+                        }
+                    }
+                }
+                return Some(text.clone());
+            }
+        }
+        None
+    }
 }
 #[derive(Debug, Clone)]
 pub enum TabBarState {
@@ -166,15 +292,10 @@ pub enum TabBarState {
     Response,
 }
 
-pub const TABBAR_ITEMS: [TabBarState; 4] = [
-    TabBarState::Headers,
-    TabBarState::Cookies,
-    TabBarState::Request,
-    TabBarState::Response,
-];
+
 
 impl TabBarState {
-    pub fn from_index(&self, index: usize) -> Option<Self> {
+    pub fn from_index(index: usize) -> Option<Self> {
         match index {
             0 => Some(Self::Headers),
             1 => Some(Self::Cookies),
@@ -215,12 +336,13 @@ impl ToString for TabBarState {
 
 #[derive(Debug, Clone)]
 pub struct TableItem {
-    status: u16,
-    method: String,
-    domain: String,
-    file_name: String,
-    mime_type: String,
-    size: Option<i64>,
+    pub status: u16,
+    pub method: String,
+    pub domain: String,
+    pub file_name: String,
+    pub mime_type: String,
+    pub size: Option<i64>,
+    pub timestamp: String,
 }
 
 impl TableItem {
@@ -289,36 +411,27 @@ impl TableItem {
             Cell::new(self.file_name.clone()),
             Cell::new(shorten_mime),
             Cell::new(size_span),
+            Cell::new(self.timestamp.clone()),
         ])
     }
 }
 
-pub const TABLES_ROWS_COUNT: usize = 6;
 
-#[derive(Debug)]
-pub enum TabItem {
-    Headers,
-    Cookie,
-    Request,
-    Response,
-    Timing,
-    Encryption,
-}
 
 #[derive(Debug)]
 pub struct HeaderInfo {
-    status: i64,
-    method: String,
-    http_version: String,
-    url: url::Url,
-    query_params: Vec<(String, String)>,
-    referrer_policy: Option<String>,
-    req_headers: Vec<(String, String)>,
-    resp_headers: Vec<(String, String)>,
+    pub status: i64,
+    pub method: String,
+    pub http_version: String,
+    pub url: url::Url,
+    pub query_params: Vec<(String, String)>,
+    pub referrer_policy: Option<String>,
+    pub req_headers: Vec<(String, String)>,
+    pub resp_headers: Vec<(String, String)>,
 }
 
 #[derive(Debug)]
 pub struct CookieInfo {
-    req_cookies: Vec<(String, String)>,
-    resp_cookies: Vec<(String, String)>,
+    pub req_cookies: Vec<(String, String)>,
+    pub resp_cookies: Vec<(String, String)>,
 }

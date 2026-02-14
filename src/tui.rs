@@ -41,7 +41,18 @@ impl<B: Backend> Tui<B> {
     }
 
     pub fn draw(&mut self, app: &mut App) -> anyhow::Result<()> {
+        if app.should_redraw {
+             app.should_redraw = false;
+             self.clear()?;
+        }
         self.terminal.draw(|frame| ui::render(app, frame))?;
+        Ok(())
+    }
+
+    pub fn clear(&mut self) -> anyhow::Result<()> {
+        self.terminal
+            .clear()
+            .context("failed to clear terminal screen")?;
         Ok(())
     }
 
@@ -57,5 +68,9 @@ impl<B: Backend> Tui<B> {
         Self::reset()?;
         self.terminal.show_cursor()?;
         Ok(())
+    }
+
+    pub fn size(&self) -> anyhow::Result<ratatui::layout::Rect> {
+        Ok(self.terminal.size()?)
     }
 }

@@ -42,9 +42,11 @@ async fn main() -> anyhow::Result<()> {
 pub async fn run(app: &mut app::App) -> anyhow::Result<()> {
     let backend = CrosstermBackend::new(std::io::stderr());
     let terminal = Terminal::new(backend)?;
+    let size = terminal.size()?;
     let events = event::EventHandler::new(250);
     let mut tui = tui::Tui::new(terminal, events);
     tui.init()?;
+    app.window_size = size;
 
     while app.running {
         tui.draw(app)?;
@@ -55,8 +57,15 @@ pub async fn run(app: &mut app::App) -> anyhow::Result<()> {
                     command.exec(app);
                 }
             }
-            event::Event::Mouse(_) => {}
-            event::Event::Resize(_, _) => {}
+            event::Event::Mouse(mouse_event) => {
+                if let Some(command) = handler::handle_mouse_events(app, mouse_event) {
+                    command.exec(app);
+                }
+            }
+            event::Event::Resize => {
+                let size = tui.size()?;
+                app.window_size = size;
+            }
         }
     }
 

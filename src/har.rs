@@ -149,12 +149,7 @@ pub struct Response {
     pub body_size: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Header2 {
-    pub name: String,
-    pub value: String,
-}
+
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
