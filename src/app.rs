@@ -1,14 +1,12 @@
 use base64::prelude::*;
-use mime;
-use ratatui::{prelude::*, widgets::*};
-use url;
-use std::process::Command;
-use std::io::Write;
-use tempfile::NamedTempFile;
 use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+use ratatui::{prelude::*, widgets::*};
+use std::io::Write;
+use std::process::Command;
+use tempfile::NamedTempFile;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActiveFocus {
@@ -35,7 +33,7 @@ impl App {
             running: true,
             index: 0,
             tabbar_state: TabBarState::Headers,
-            har: har,
+            har,
             scroll: 0,
             should_redraw: false,
             window_size: Rect::default(),
@@ -106,7 +104,11 @@ impl App {
 
     pub fn prev_tab(&mut self) {
         let current_index = self.tabbar_state.to_index();
-        let prev_index = if current_index == 0 { 3 } else { current_index - 1 };
+        let prev_index = if current_index == 0 {
+            3
+        } else {
+            current_index - 1
+        };
         self.tabbar_state = TabBarState::from_index(prev_index).unwrap();
         self.scroll = 0;
     }
@@ -273,7 +275,9 @@ impl Har {
                 if let Some(encoding) = &entry.response.content.encoding {
                     if encoding.eq_ignore_ascii_case("base64") {
                         match BASE64_STANDARD.decode(text) {
-                            Ok(decoded) => return Some(String::from_utf8_lossy(&decoded).to_string()),
+                            Ok(decoded) => {
+                                return Some(String::from_utf8_lossy(&decoded).to_string())
+                            }
                             Err(_) => return Some(format!("Error decoding base64: {}", text)),
                         }
                     }
@@ -291,8 +295,6 @@ pub enum TabBarState {
     Request,
     Response,
 }
-
-
 
 impl TabBarState {
     pub fn from_index(index: usize) -> Option<Self> {
@@ -315,14 +317,15 @@ impl TabBarState {
     }
 }
 
-impl ToString for TabBarState {
-    fn to_string(&self) -> String {
-        match self {
-            Self::Headers => " [1] Headers ".to_string(),
-            Self::Cookies => " [2] Cookies ".to_string(),
-            Self::Request => " [3] Request ".to_string(),
-            Self::Response => " [4] Response ".to_string(),
-        }
+impl std::fmt::Display for TabBarState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Self::Headers => " [1] Headers ",
+            Self::Cookies => " [2] Cookies ",
+            Self::Request => " [3] Request ",
+            Self::Response => " [4] Response ",
+        };
+        write!(f, "{}", s)
     }
 }
 
@@ -415,8 +418,6 @@ impl TableItem {
         ])
     }
 }
-
-
 
 #[derive(Debug)]
 pub struct HeaderInfo {

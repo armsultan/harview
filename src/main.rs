@@ -5,12 +5,10 @@ mod har;
 mod tui;
 mod ui;
 use anyhow::Context;
-use clap;
 use clap::Parser;
 use har::Har;
 use ratatui::prelude::*;
 use std::path::PathBuf;
-use tokio;
 
 #[derive(clap::Parser, Debug)]
 #[command(

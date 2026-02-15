@@ -42,8 +42,8 @@ impl<B: Backend> Tui<B> {
 
     pub fn draw(&mut self, app: &mut App) -> anyhow::Result<()> {
         if app.should_redraw {
-             app.should_redraw = false;
-             self.clear()?;
+            app.should_redraw = false;
+            self.clear()?;
         }
         self.terminal.draw(|frame| ui::render(app, frame))?;
         Ok(())

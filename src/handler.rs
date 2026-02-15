@@ -49,7 +49,9 @@ pub fn handle_key_events(key_event: KeyEvent) -> Option<Command> {
         KeyCode::Char('j') => Some(Command::TableFocusDelta(1)),
         KeyCode::Char('k') => Some(Command::TableFocusDelta(-1)),
         KeyCode::Up if key_event.modifiers.contains(KeyModifiers::SHIFT) => Some(Command::ScrollUp),
-        KeyCode::Down if key_event.modifiers.contains(KeyModifiers::SHIFT) => Some(Command::ScrollDown),
+        KeyCode::Down if key_event.modifiers.contains(KeyModifiers::SHIFT) => {
+            Some(Command::ScrollDown)
+        }
         KeyCode::Char('J') => Some(Command::OpenInFx),
         KeyCode::Down => Some(Command::TableFocusDelta(1)),
         KeyCode::Up => Some(Command::TableFocusDelta(-1)),
@@ -88,7 +90,7 @@ pub fn handle_mouse_events(app: &mut app::App, mouse_event: MouseEvent) -> Optio
             }
         }
         MouseEventKind::ScrollUp => {
-             if mouse_event.row < split_y {
+            if mouse_event.row < split_y {
                 Some(Command::TableFocusDelta(-1))
             } else {
                 Some(Command::ScrollUp)
@@ -97,10 +99,10 @@ pub fn handle_mouse_events(app: &mut app::App, mouse_event: MouseEvent) -> Optio
         MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
             // Check for Tab Click
             // Tab bar is at the top of the second pane?
-            // In ui.rs: layout[0] is table, layout[1] is preview. 
+            // In ui.rs: layout[0] is table, layout[1] is preview.
             // layout[1] is split into tabbar (1 line) and content.
             // So tab bar is at split_y.
-            
+
             if mouse_event.row == split_y {
                 // Approximate tab widths: " [1] Headers " is 13 chars.
                 // Padding 1 space each side.

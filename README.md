@@ -2,39 +2,52 @@
 
 # harview
 
-HTTP Archive (HAR) Viewer on the terminal, written in Rust
+A fast, lightweight HTTP Archive (HAR) viewer for the terminal, written in Rust.
 
-*This tool is still under development. Please note that specifications are subject to change without notice.*
+*Forked from [sheepla/harview](https://github.com/sheepla/harview) with added features and improvements. WIP with vibe code :-D*
+
+[![Rust](https://img.shields.io/badge/rust-stable-orange.svg)](https://www.rust-lang.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+
+<!-- Add a screenshot or demo GIF here -->
+<!-- ![harview demo](./assets/demo.gif) -->
 
 </div>
 
-> [!NOTE]
-> This is a fork of the original `harview` tool. I am building upon the original repository to add new features and improvements.
+---
 
-## About
+## Overview
 
-**harview** is a viewer of HAR files that runs on the terminal. You can easily view HAR files exported from a web browser without opening the browser.
+**harview** lets you browse HAR files directly in your terminal—no browser required. It's designed for developers and security professionals who prefer the command line and want a quick, lightweight way to inspect HTTP traffic in the terminal.
 
-The goal of this tool is not to provide in-depth analysis capabilities like DevTool, but to provide the ability to browse HAR files with a lightweight UI like an easy-to-use pager for those familiar with the command line interface.
+## Features
 
-## New Features
+### Core Functionality
+- **Split-Pane Interface** — Request list on top, detailed view below
+- **Tab Navigation** — Quickly switch between Headers, Cookies, Request Body, and Response Body
+- **Syntax Highlighting** — Support for JSON, HTML, XML, JavaScript, and CSS
+- **Pretty Printing** — Auto-formatted JSON and HTML for readability
 
-This fork includes several enhancements over the original:
+### Mouse Support
+- **Pane-Aware Scrolling** — Scroll independently in list or details pane based on hover
+- **Visual Focus Indicator** — Active pane highlighted with a green border
+- **Clickable Tabs** — Switch views with a single click
 
--   **Mouse Support**:
-    -   **Split-Pane Scrolling**: Independent scrolling for the request list (top) and details pane (bottom) based on mouse hover.
-    -   **Focus Highlighting**: The active pane is highlighted with a green border.
-    -   **Clickable Tabs**: Switch between Headers, Cookies, Request, and Response by clicking the tabs.
--   **External Viewer Integration**: Open JSON bodies in `fx` for advanced exploration (requires `fx`).
--   **Enhanced UI**:
-    -   **Timestamp Column**: Added to the request list.
-    -   **Syntaxt Highlighting**: For JSON, HTML, XML, JS, and CSS.
-    -   **Pretty Printing**: Auto-formatting for JSON and HTML.
-    -   **Scrolling**: Proper scrolling support for Headers and Cookies views.
+### Integrations
+- **External JSON Viewer** — Open JSON bodies in [`fx`](https://fx.wtf/) for advanced querying and exploration
 
-## Prerequisites
+## Installation
 
-To use the external viewer feature, you need to have `fx` installed on your system.
+### From Source
+
+```sh
+git clone https://github.com/armsultan/harview.git
+cd harview
+cargo install --path .
+```
+
+### Optional: Install `fx` for JSON Inspection
 
 ```sh
 npm install -g fx
@@ -42,60 +55,59 @@ npm install -g fx
 
 ## Usage
 
-### Export HAR files from Browsers
+### 1. Export a HAR File
 
-Open your web browser's DevTools and export the HAR file.
+Open your browser's DevTools (F12), go to the **Network** tab, and export the session as a HAR file.
 
-### Use *harview* TUI
-
-To use harview, specify the path of the HAR file as the first argument. Once the HAR file is loaded, entries in the HTTP log will appear in the table.
+### 2. View with harview
 
 ```sh
-harview example.com.har
+harview path/to/file.har
 ```
 
-### Controls
+## Controls
 
-**Keyboard Shortcuts**
+### Keyboard
 
 | Key | Action |
-|-----|---------|
-| `k` / `Up` | Move focus up (List) |
-| `j` / `Down` | Move focus down (List) |
-| `u` | Move focus up by 3 |
-| `d` | Move focus down by 3 |
-| `g` / `Home` | Go to top |
-| `G` / `End` | Go to bottom |
-| `Shift+Up` / `PageUp` | Scroll Up (Details/Body) |
-| `Shift+Down` / `PageDown` | Scroll Down (Details/Body) |
-| `1` - `4` | Switch tab (Headers, Cookies, Request, Response) |
-| `Left` / `Right` | Cycle through tabs |
-| `Shift+j` / `J` | Open current JSON body in `fx` |
-| `q` or `Ctrl-C` | Quit application |
+|-----|--------|
+| `j` / `↓` | Move selection down |
+| `k` / `↑` | Move selection up |
+| `d` | Move down by 3 |
+| `u` | Move up by 3 |
+| `g` / `Home` | Jump to top |
+| `G` / `End` | Jump to bottom |
+| `Shift+↓` / `PageDown` | Scroll details pane down |
+| `Shift+↑` / `PageUp` | Scroll details pane up |
+| `1` – `4` | Switch to tab (Headers, Cookies, Request, Response) |
+| `←` / `→` | Cycle through tabs |
+| `J` | Open JSON body in `fx` |
+| `q` / `Ctrl+C` | Quit |
 
-**Mouse Actions**
+### Mouse
 
-| Action | Description |
-|--------|-------------|
-| **Hover** | Automatically focuses the top (List) or bottom (Details) pane. |
-| **Scroll Wheel** | Scrolls the focused pane. |
-| **Left Click** | Click on tabs (`[1] Headers`, etc.) to switch views. |
+| Action | Effect |
+|--------|--------|
+| Hover | Focus the list or details pane |
+| Scroll | Scroll within the focused pane |
+| Click Tab | Switch to the clicked tab |
 
-## Installation
+## Enhancement ideas
 
-Clone this repository then run `cargo install`
-
-```sh
-git clone https://github.com/sheepla/harview.git
-cd harview
-cargo install --path .
-```
+- [ ] Search and filter requests
+- [ ] Export selected entries
+- [ ] Support for additional content types
+- [ ] Configurable color themes
 
 ## References
 
-- [HAR (file format) - Wikipedia](https://en.wikipedia.org/wiki/HAR_%28file_format%29)
-- [HTTP Archive (HAR) Format Specifications - W3C](https://w3c.github.io/web-performance/specs/HAR/Overview.html)
+- [HAR File Format — Wikipedia](https://en.wikipedia.org/wiki/HAR_%28file_format%29)
+- [HAR Specification — W3C](https://w3c.github.io/web-performance/specs/HAR/Overview.html)
 
-## Thanks
+## Acknowledgments
 
-- [ratatui](https://ratatui.rs/) - This tool was built with ratatui, a TUI library for Rust. Thank you for the amazing library and its ecosystem!
+Built with [ratatui](https://ratatui.rs/), a powerful TUI library for Rust.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
