@@ -71,12 +71,12 @@ impl<'a> StatefulWidget for EntriesTable<'a> {
 
         let widths = [
             Constraint::Length(6),
-            Constraint::Length(6),
+            Constraint::Length(7),
+            Constraint::Fill(3),
             Constraint::Fill(1),
-            Constraint::Fill(2),
-            Constraint::Length(12),
-            Constraint::Length(12),
-            Constraint::Length(26),
+            Constraint::Length(20),
+            Constraint::Length(10),
+            Constraint::Length(14),
         ];
 
         let rows: Vec<Row> = visible_items
