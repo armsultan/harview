@@ -111,7 +111,7 @@ impl App {
             cached_preview_text: None,
             cached_key: None,
             table_items: Vec::new(),
-            enable_syntax_highlighting: true,
+            enable_syntax_highlighting: false,
             table_offset: 0,
         };
         app.table_items = app.generate_table_items();

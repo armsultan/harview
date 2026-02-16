@@ -14,8 +14,6 @@ pub fn render(app: &mut App, frame: &mut Frame) {
 pub fn render_table(app: &mut App, area: Rect, buf: &mut Buffer) {
     let table = EntriesTable::init(app);
     let mut state = TableState::default();
-    state.select(Some(app.get_index()));
-    *state.offset_mut() = app.table_offset;
     table.render(area, buf, &mut state);
 }
 
@@ -28,21 +26,38 @@ pub fn render_preview(app: &mut App, area: Rect, buf: &mut Buffer) {
 pub struct EntriesTable<'a> {
     table_items: &'a [TableItem],
     active_focus: ActiveFocus,
+    table_offset: usize,
+    selected_index: usize,
 }
 
 impl<'a> EntriesTable<'a> {
     pub fn init(app: &'a App) -> Self {
-        let mut state = TableState::default();
-        let index = app.get_index();
-        state.select(Some(index));
-
         Self {
             table_items: &app.table_items,
             active_focus: app.active_focus,
+            table_offset: app.table_offset,
+            selected_index: app.get_index(),
         }
     }
+}
 
-    fn table(&self) -> Table<'_> {
+impl<'a> StatefulWidget for EntriesTable<'a> {
+    type State = TableState;
+
+    fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+        // Calculate visible items
+        // Table block has borders (2) + header (1) = 3 lines overhead
+        let list_height = (area.height as usize).saturating_sub(3);
+        
+        let start_index = self.table_offset;
+        let end_index = (start_index + list_height).min(self.table_items.len());
+        
+        let visible_items = if start_index < self.table_items.len() {
+            &self.table_items[start_index..end_index]
+        } else {
+            &[]
+        };
+
         let headers = Row::new(vec![
             Cell::from("Status"),
             Cell::from("Method"),
@@ -64,13 +79,20 @@ impl<'a> EntriesTable<'a> {
             Constraint::Length(26),
         ];
 
-        let rows: Vec<Row> = self
-            .table_items
+        let rows: Vec<Row> = visible_items
             .iter()
             .map(|item| item.to_table_row())
             .collect();
+        
+        // Adjust selection to be relative to the sliced view
+        if self.selected_index >= start_index && self.selected_index < end_index {
+            state.select(Some(self.selected_index - start_index));
+        } else {
+            state.select(None); 
+        }
+        *state.offset_mut() = 0; // We are handling offset manually by slicing
 
-        Table::new(rows, &widths)
+        let table = Table::new(rows, &widths)
             .header(headers)
             .highlight_style(Style::default().reversed())
             .block(
@@ -82,15 +104,7 @@ impl<'a> EntriesTable<'a> {
                     } else {
                         Style::default().fg(Color::DarkGray)
                     }),
-            )
-    }
-}
-
-impl<'a> StatefulWidget for EntriesTable<'a> {
-    type State = TableState;
-
-    fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        let table = self.table();
+            );
 
         StatefulWidget::render(table, area, buf, state);
     }
