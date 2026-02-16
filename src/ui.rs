@@ -130,6 +130,7 @@ impl<'a> PreviewWidget<'a> {
             " [2] Cookies ",
             " [3] Request ",
             " [4] Response ",
+            " [?] Help ",
         ])
         .select(self.tabbar_state.to_index())
         .padding(" ", " ")
@@ -166,6 +167,10 @@ impl<'a> Widget for PreviewWidget<'a> {
             TabBarState::Response => {
                 let response_preview = ResponsePreview::init(self.app);
                 response_preview.render(layout[1], buf);
+            }
+            TabBarState::Help => {
+                let help_preview = HelpPreview::init(self.app);
+                help_preview.render(layout[1], buf);
             }
         }
     }
@@ -408,14 +413,21 @@ pub struct ResponsePreview<'a> {
     app: &'a App,
     scroll: u16,
     active_focus: ActiveFocus,
+    was_base64_decoded: bool,
 }
 
 impl<'a> ResponsePreview<'a> {
     pub fn init(app: &'a App) -> Self {
+        let was_base64_decoded = app.har.log.entries
+            .get(app.get_index())
+            .and_then(|e| e.response.content.encoding.as_deref())
+            .is_some_and(|enc| enc == "base64");
+
         Self {
             app,
             scroll: app.scroll,
             active_focus: app.active_focus,
+            was_base64_decoded,
         }
     }
 }
@@ -441,11 +453,17 @@ impl<'a> Widget for ResponsePreview<'a> {
             Text::raw("Loading or No Response Body...")
         };
 
+        let title = if self.was_base64_decoded {
+            "Response Body (base64 decoded)"
+        } else {
+            "Response Body"
+        };
+
         let mut paragraph = Paragraph::new(text)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title("Response Body")
+                    .title(title)
                     .border_style(if self.active_focus == ActiveFocus::Preview {
                         Style::default().fg(Color::Green)
                     } else {
@@ -457,6 +475,149 @@ impl<'a> Widget for ResponsePreview<'a> {
         if self.app.enable_syntax_highlighting {
             paragraph = paragraph.wrap(Wrap { trim: false });
         }
+        Widget::render(paragraph, area, buf);
+    }
+}
+
+pub struct HelpPreview {
+    scroll: u16,
+    active_focus: ActiveFocus,
+}
+
+impl HelpPreview {
+    pub fn init(app: &App) -> Self {
+        Self {
+            scroll: app.scroll,
+            active_focus: app.active_focus,
+        }
+    }
+}
+
+impl Widget for HelpPreview {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let bold_underline = Style::default().bold().underlined();
+        let key_style = Style::default().fg(Color::Yellow);
+        let dim = Style::default().fg(Color::DarkGray);
+
+        let lines = vec![
+            Line::from(Span::styled("Navigation", bold_underline)),
+            Line::from(vec![
+                Span::styled("  j / Down      ", key_style),
+                Span::raw("Move selection down"),
+            ]),
+            Line::from(vec![
+                Span::styled("  k / Up        ", key_style),
+                Span::raw("Move selection up"),
+            ]),
+            Line::from(vec![
+                Span::styled("  d             ", key_style),
+                Span::raw("Move down by 3"),
+            ]),
+            Line::from(vec![
+                Span::styled("  u             ", key_style),
+                Span::raw("Move up by 3"),
+            ]),
+            Line::from(vec![
+                Span::styled("  g             ", key_style),
+                Span::raw("Jump to first entry"),
+            ]),
+            Line::from(vec![
+                Span::styled("  G             ", key_style),
+                Span::raw("Jump to last entry"),
+            ]),
+            Line::from(""),
+            Line::from(Span::styled("Details Pane Scrolling", bold_underline)),
+            Line::from(vec![
+                Span::styled("  Shift+Up      ", key_style),
+                Span::raw("Scroll up by 1 line"),
+            ]),
+            Line::from(vec![
+                Span::styled("  Shift+Down    ", key_style),
+                Span::raw("Scroll down by 1 line"),
+            ]),
+            Line::from(vec![
+                Span::styled("  PageUp        ", key_style),
+                Span::raw("Scroll up by 10 lines"),
+            ]),
+            Line::from(vec![
+                Span::styled("  PageDown      ", key_style),
+                Span::raw("Scroll down by 10 lines"),
+            ]),
+            Line::from(""),
+            Line::from(Span::styled("Tabs", bold_underline)),
+            Line::from(vec![
+                Span::styled("  1-4           ", key_style),
+                Span::raw("Switch to tab (Headers, Cookies, Request, Response)"),
+            ]),
+            Line::from(vec![
+                Span::styled("  Left / Right  ", key_style),
+                Span::raw("Cycle through tabs"),
+            ]),
+            Line::from(vec![
+                Span::styled("  ?             ", key_style),
+                Span::raw("Show this help"),
+            ]),
+            Line::from(""),
+            Line::from(Span::styled("Display", bold_underline)),
+            Line::from(vec![
+                Span::styled("  h             ", key_style),
+                Span::raw("Toggle syntax highlighting"),
+            ]),
+            Line::from(""),
+            Line::from(Span::styled("External Viewers (Request/Response tabs)", bold_underline)),
+            Line::from(vec![
+                Span::styled("  b             ", key_style),
+                Span::raw("Open body in bat"),
+            ]),
+            Line::from(vec![
+                Span::styled("  J             ", key_style),
+                Span::raw("Open JSON in fx"),
+            ]),
+            Line::from(vec![
+                Span::styled("  o             ", key_style),
+                Span::raw("Open body in $EDITOR"),
+            ]),
+            Line::from(""),
+            Line::from(Span::styled("Mouse", bold_underline)),
+            Line::from(vec![
+                Span::styled("  Scroll        ", key_style),
+                Span::raw("Navigate entries or scroll details"),
+            ]),
+            Line::from(vec![
+                Span::styled("  Click row     ", key_style),
+                Span::raw("Select entry"),
+            ]),
+            Line::from(vec![
+                Span::styled("  Click tab     ", key_style),
+                Span::raw("Switch tab"),
+            ]),
+            Line::from(""),
+            Line::from(Span::styled("General", bold_underline)),
+            Line::from(vec![
+                Span::styled("  q / Ctrl+C    ", key_style),
+                Span::raw("Quit"),
+            ]),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Base64-encoded responses are automatically decoded.",
+                dim,
+            )),
+        ];
+
+        let paragraph = Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Help")
+                    .border_style(if self.active_focus == ActiveFocus::Preview {
+                        Style::default().fg(Color::Green)
+                    } else {
+                        Style::default().fg(Color::DarkGray)
+                    }),
+            )
+            .wrap(Wrap { trim: false })
+            .scroll((self.scroll, 0));
+
         Widget::render(paragraph, area, buf);
     }
 }

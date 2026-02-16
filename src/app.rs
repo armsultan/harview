@@ -37,6 +37,7 @@ pub enum TabBarState {
     Cookies,
     Request,
     Response,
+    Help,
 }
 
 impl std::fmt::Display for TabBarState {
@@ -46,7 +47,7 @@ impl std::fmt::Display for TabBarState {
             Self::Cookies => " [2] Cookies ",
             Self::Request => " [3] Request ",
             Self::Response => " [4] Response ",
-
+            Self::Help => " [?] Help ",
         };
         write!(f, "{}", s)
     }
@@ -58,18 +59,18 @@ impl TabBarState {
             Self::Headers => Self::Cookies,
             Self::Cookies => Self::Request,
             Self::Request => Self::Response,
-            Self::Response => Self::Headers,
-
+            Self::Response => Self::Help,
+            Self::Help => Self::Headers,
         }
     }
 
     pub fn prev(&self) -> Self {
         match self {
-            Self::Headers => Self::Response,
+            Self::Headers => Self::Help,
             Self::Cookies => Self::Headers,
             Self::Request => Self::Cookies,
             Self::Response => Self::Request,
-
+            Self::Help => Self::Response,
         }
     }
 
@@ -79,7 +80,7 @@ impl TabBarState {
             Self::Cookies => 1,
             Self::Request => 2,
             Self::Response => 3,
-
+            Self::Help => 4,
         }
     }
 }

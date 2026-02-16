@@ -86,6 +86,7 @@ pub fn handle_key_events(key_event: KeyEvent) -> Option<Command> {
         KeyCode::PageUp => Some(Command::PageUp),
         KeyCode::PageDown => Some(Command::PageDown),
         KeyCode::Char('h') => Some(Command::ToggleSyntaxHighlighting),
+        KeyCode::Char('?') => Some(Command::SetTabBarState(app::TabBarState::Help)),
         _ => None,
     }
 }
@@ -139,6 +140,8 @@ pub fn handle_mouse_events(app: &mut app::App, mouse_event: MouseEvent) -> Optio
                     Some(Command::SetTabBarState(app::TabBarState::Request))
                 } else if x < 61 {
                     Some(Command::SetTabBarState(app::TabBarState::Response))
+                } else if x < 74 {
+                    Some(Command::SetTabBarState(app::TabBarState::Help))
                 } else {
                     None
                 }

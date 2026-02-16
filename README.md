@@ -116,6 +116,7 @@ harview path/to/file.har
 |-----|--------|
 | `1` – `4` | Switch to tab (Headers, Cookies, Request, Response) |
 | `←` / `→` | Cycle through tabs |
+| `?` | Show help tab with all keybindings |
 | `h` | Toggle syntax highlighting |
 
 #### External Viewers (Request/Response tabs only)
