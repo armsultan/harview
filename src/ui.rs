@@ -61,8 +61,7 @@ impl<'a> StatefulWidget for EntriesTable<'a> {
         let headers = Row::new(vec![
             Cell::from("Status"),
             Cell::from("Method"),
-            Cell::from("Domain"),
-            Cell::from("FileName"),
+            Cell::from("URL"),
             Cell::from("ContentType"),
             Cell::from("     Size  "),
             Cell::from("Timestamp"),
@@ -72,7 +71,6 @@ impl<'a> StatefulWidget for EntriesTable<'a> {
         let widths = [
             Constraint::Length(6),
             Constraint::Length(7),
-            Constraint::Fill(3),
             Constraint::Fill(1),
             Constraint::Length(20),
             Constraint::Length(10),

@@ -463,8 +463,6 @@ impl App {
             .iter()
             .map(|entry| {
                 let url = entry.request.url.as_str().to_string();
-                let path = entry.request.url.path();
-                let filename = path.split('/').last().unwrap_or(path).to_string();
                 let mime_type = entry.response.content.mime_type.clone().unwrap_or_default();
                 let status = entry.response.status as u16;
 
@@ -488,7 +486,6 @@ impl App {
                     status,
                     method: entry.request.method.clone(),
                     url,
-                    filename,
                     mime_type,
                     total_size: size,
                     timestamp,
@@ -575,7 +572,7 @@ pub struct TableItem {
     pub status: u16,
     pub method: String,
     pub url: String,
-    pub filename: String,
+
     pub mime_type: String,
     pub total_size: String,
     pub timestamp: String,
@@ -594,7 +591,6 @@ impl TableItem {
             }),
             Cell::from(self.method.as_str()).style(Style::default().fg(Color::Yellow)),
             Cell::from(self.url.as_str()).style(Style::default().fg(Color::LightBlue)),
-            Cell::from(self.filename.as_str()),
             Cell::from(self.mime_type.as_str()).style(Style::default().fg(Color::Magenta)),
             Cell::from(self.total_size.as_str()).style(Style::default().fg(Color::LightCyan)),
             Cell::from(self.timestamp.as_str()),
