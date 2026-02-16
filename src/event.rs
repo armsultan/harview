@@ -75,4 +75,10 @@ impl EventHandler {
             .await
             .ok_or(anyhow::anyhow!("failed to receive event"))
     }
+
+    /// Abort the background event reader task.
+    /// Must be called before launching external programs that need stdin.
+    pub fn stop(&mut self) {
+        self.handler.abort();
+    }
 }

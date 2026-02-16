@@ -41,37 +41,67 @@ pub async fn run(app: &mut app::App) -> anyhow::Result<()> {
     let backend = CrosstermBackend::new(std::io::stderr());
     let terminal = Terminal::new(backend)?;
     let size = terminal.size()?;
-    let events = event::EventHandler::new(250);
+    let events = event::EventHandler::new(1000);
     let mut tui = tui::Tui::new(terminal, events);
     tui.init()?;
     app.window_size = size;
 
-    loop {
-        // Ensure cache is populated before drawing
-        // This is where the expensive syntax highlighting happens if needed
-        app.get_preview_text();
+    // Initial draw before entering the event loop
+    app.get_preview_text();
+    tui.draw(app)?;
 
-        tui.draw(app)?;
-        match tui.events.next().await? {
-            event::Event::Tick => app.tick(),
+    loop {
+        let needs_draw = match tui.events.next().await? {
+            event::Event::Tick => false, // Ticks don't change state, skip redraw
             event::Event::Key(key_event) => {
                 if let Some(command) = handler::handle_key_events(key_event) {
                     command.exec(app);
                 }
+                true
             }
             event::Event::Mouse(mouse_event) => {
                 if let Some(command) = handler::handle_mouse_events(app, mouse_event) {
                     command.exec(app);
                 }
+                true
             }
             event::Event::Resize => {
                 let size = tui.size()?;
                 app.window_size = size;
+                true
             }
-        }
+        };
 
         if !app.running {
             break;
+        }
+
+        // Handle deferred external program launches.
+        // We must stop the event handler BEFORE launching so it doesn't
+        // compete with the external program (bat/fx/editor) for stdin.
+        if let Some(action) = app.pending_action.take() {
+            tui.events.stop();
+
+            let result = match action {
+                app::PendingAction::OpenInBat => app.open_in_bat(),
+                app::PendingAction::OpenInFx => app.open_in_fx(),
+                app::PendingAction::OpenInEditor => app.open_in_editor(),
+            };
+            if let Err(e) = result {
+                eprintln!("Error: {}", e);
+            }
+
+            // Create a fresh event handler — clean stdin, no stale events
+            tui.events = event::EventHandler::new(1000);
+
+            app.get_preview_text();
+            tui.draw(app)?;
+            continue;
+        }
+
+        if needs_draw {
+            app.get_preview_text();
+            tui.draw(app)?;
         }
     }
 

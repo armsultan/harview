@@ -374,7 +374,7 @@ impl<'a> Widget for RequestPreview<'a> {
                     .iter()
                     .skip(start)
                     .take(height)
-                    .cloned()
+                    .map(|line| truncate_line(line, 2000))
                     .collect();
                 Text::from(lines)
             }
@@ -382,7 +382,7 @@ impl<'a> Widget for RequestPreview<'a> {
             Text::raw("Loading or No Body...")
         };
 
-        let paragraph = Paragraph::new(text)
+        let mut paragraph = Paragraph::new(text)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
@@ -393,8 +393,12 @@ impl<'a> Widget for RequestPreview<'a> {
                         Style::default().fg(Color::DarkGray)
                     }),
             )
-            .wrap(Wrap { trim: false })
             .scroll((0, 0)); // We handled scrolling manually
+
+        if self.app.enable_syntax_highlighting {
+            paragraph = paragraph.wrap(Wrap { trim: false });
+        }
+        
         Widget::render(paragraph, area, buf);
     }
 
@@ -429,7 +433,7 @@ impl<'a> Widget for ResponsePreview<'a> {
                     .iter()
                     .skip(start)
                     .take(height)
-                    .cloned()
+                    .map(|line| truncate_line(line, 2000))
                     .collect();
                 Text::from(lines)
             }
@@ -437,7 +441,7 @@ impl<'a> Widget for ResponsePreview<'a> {
             Text::raw("Loading or No Response Body...")
         };
 
-        let paragraph = Paragraph::new(text)
+        let mut paragraph = Paragraph::new(text)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
@@ -448,10 +452,42 @@ impl<'a> Widget for ResponsePreview<'a> {
                         Style::default().fg(Color::DarkGray)
                     }),
             )
-            .scroll((0, 0)) // We handled scrolling manually
-            .wrap(Wrap { trim: false });
+            .scroll((0, 0)); // We handled scrolling manually
+
+        if self.app.enable_syntax_highlighting {
+            paragraph = paragraph.wrap(Wrap { trim: false });
+        }
         Widget::render(paragraph, area, buf);
     }
+}
+
+// Helper to truncate lines for performance
+fn truncate_line<'a>(line: &'a Line<'a>, max_width: usize) -> Line<'a> {
+    let mut current_width = 0;
+    let mut new_spans = Vec::new();
+    
+    for span in &line.spans {
+        let content = span.content.as_ref();
+        let remaining = max_width.saturating_sub(current_width);
+        
+        if remaining == 0 {
+            break;
+        }
+
+        if content.len() <= remaining {
+            new_spans.push(span.clone());
+            current_width += content.len();
+        } else {
+            let truncated = &content[..remaining];
+            let mut new_span = span.clone();
+            new_span.content = std::borrow::Cow::Owned(truncated.to_string());
+            new_spans.push(new_span);
+            current_width += remaining;
+            break;
+        }
+    }
+    
+    Line::from(new_spans).style(line.style)
 }
 
 

@@ -19,6 +19,13 @@ use tempfile::{Builder, NamedTempFile};
 use crate::har::Har;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingAction {
+    OpenInBat,
+    OpenInFx,
+    OpenInEditor,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActiveFocus {
     Table,
     Preview,
@@ -95,6 +102,8 @@ pub struct App {
     pub enable_syntax_highlighting: bool,
     // Add manual offset for table
     pub table_offset: usize,
+    // Deferred external program action (handled by main loop which owns the event handler)
+    pub pending_action: Option<PendingAction>,
 }
 
 impl App {
@@ -113,6 +122,7 @@ impl App {
             table_items: Vec::new(),
             enable_syntax_highlighting: false,
             table_offset: 0,
+            pending_action: None,
         };
         app.table_items = app.generate_table_items();
         app
@@ -258,12 +268,11 @@ impl App {
         // Resume TUI
         enable_raw_mode()?;
         execute!(std::io::stderr(), EnterAlternateScreen, EnableMouseCapture)?;
-        
+
         // Force a full redraw
-        self.should_redraw = true; 
+        self.should_redraw = true;
 
         if let Err(e) = status {
-             // Handle error (maybe log it or show a message)
              eprintln!("Failed to open fx: {}", e);
         }
 
@@ -318,12 +327,73 @@ impl App {
         // Resume TUI
         enable_raw_mode()?;
         execute!(std::io::stderr(), EnterAlternateScreen, EnableMouseCapture)?;
-        
+
         // Force a full redraw
-        self.should_redraw = true; 
+        self.should_redraw = true;
 
         if let Err(e) = status {
              eprintln!("Failed to open bat: {}", e);
+        }
+
+        Ok(())
+    }
+
+    pub fn open_in_editor(&mut self) -> anyhow::Result<()> {
+        let entry = &self.har.log.entries[self.index];
+        let (body, mime) = match self.tabbar_state {
+            TabBarState::Request => {
+                let text = entry.request.post_data.as_ref().map(|p| p.text.clone()).unwrap_or_default();
+                let mime = entry.request.post_data.as_ref().map(|p| p.mime_type.clone()).unwrap_or_default();
+                (text, mime)
+            }
+            TabBarState::Response => {
+                 let text = self.to_response_body(self.index).unwrap_or_else(|| "No response body".to_string());
+                 let mime = entry.response.content.mime_type.clone().unwrap_or_default();
+                 (text, mime)
+            }
+            _ => return Ok(()),
+        };
+
+        let extension = if mime.contains("json") {
+            "json"
+        } else if mime.contains("html") {
+            "html"
+        } else if mime.contains("javascript") || mime.contains("js") {
+            "js"
+        } else if mime.contains("css") {
+            "css"
+        } else if mime.contains("xml") {
+            "xml"
+        } else {
+            "txt"
+        };
+
+        let mut temp_file = Builder::new()
+            .suffix(&format!(".{}", extension))
+            .tempfile()?;
+            
+        write!(temp_file, "{}", body)?;
+        temp_file.flush()?;
+
+        let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
+
+        // Temporarily suspend TUI
+        execute!(std::io::stderr(), LeaveAlternateScreen, DisableMouseCapture)?;
+        disable_raw_mode()?;
+
+        let status = Command::new(editor)
+            .arg(temp_file.path())
+            .status();
+
+        // Resume TUI
+        enable_raw_mode()?;
+        execute!(std::io::stderr(), EnterAlternateScreen, EnableMouseCapture)?;
+
+        // Force a full redraw
+        self.should_redraw = true;
+
+        if let Err(e) = status {
+             eprintln!("Failed to open editor: {}", e);
         }
 
         Ok(())
@@ -547,13 +617,35 @@ pub struct CookieInfo {
 }
 
 pub fn syntax_highlight(text: &str, mime_type: &str) -> Text<'static> {
-    let ps = SyntaxSet::load_defaults_newlines();
-    let ts = ThemeSet::load_defaults();
+    use std::sync::LazyLock;
+    static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
+    static THEME_SET: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
+
+    // Skip highlighting for very large content to keep the UI responsive.
+    // Use bat ('b') for detailed viewing of large payloads.
+    const MAX_HIGHLIGHT_BYTES: usize = 200_000;
+
+    let ps = &*SYNTAX_SET;
+    let ts = &*THEME_SET;
     let mime_type = mime_type.to_lowercase();
 
     // Try to format as JSON first if it looks like JSON or MIME matches
     let json_parsed = serde_json::from_str::<serde_json::Value>(text);
     let is_json = json_parsed.is_ok();
+
+    let formatted_text = if mime_type.contains("json") || is_json {
+        json_parsed
+            .and_then(|v| serde_json::to_string_pretty(&v))
+            .unwrap_or_else(|_| text.to_string())
+    } else if mime_type.contains("xml") {
+        prettyish_html::prettify(text)
+    } else {
+        text.to_string()
+    };
+
+    if formatted_text.len() > MAX_HIGHLIGHT_BYTES {
+        return Text::from(formatted_text);
+    }
 
     let syntax = if mime_type.contains("json") || is_json {
         ps.find_syntax_by_extension("json").unwrap()
@@ -567,16 +659,6 @@ pub fn syntax_highlight(text: &str, mime_type: &str) -> Text<'static> {
         ps.find_syntax_by_extension("css").unwrap()
     } else {
         ps.find_syntax_plain_text()
-    };
-
-    let formatted_text = if mime_type.contains("json") || is_json {
-        json_parsed
-            .and_then(|v| serde_json::to_string_pretty(&v))
-            .unwrap_or_else(|_| text.to_string())
-    } else if mime_type.contains("xml") {
-        prettyish_html::prettify(text)
-    } else {
-        text.to_string()
     };
 
     let mut highlighter = HighlightLines::new(syntax, &ts.themes["base16-ocean.dark"]);

@@ -14,6 +14,7 @@ pub enum Command {
     PageDown,
     OpenInFx,
     OpenInBat,
+    OpenInEditor,
     TabNext,
     TabPrev,
 
@@ -34,14 +35,13 @@ impl Command {
             Self::PageUp => app.on_page_up(),
             Self::PageDown => app.on_page_down(),
             Self::OpenInFx => {
-                if let Err(e) = app.open_in_fx() {
-                    eprintln!("Error opening fx: {}", e);
-                }
+                app.pending_action = Some(app::PendingAction::OpenInFx);
             },
             Self::OpenInBat => {
-                if let Err(e) = app.open_in_bat() {
-                    eprintln!("Error opening bat: {}", e);
-                }
+                app.pending_action = Some(app::PendingAction::OpenInBat);
+            },
+            Self::OpenInEditor => {
+                app.pending_action = Some(app::PendingAction::OpenInEditor);
             },
             Self::TabNext => app.next_tab(),
             Self::TabPrev => app.prev_tab(),
@@ -70,6 +70,7 @@ pub fn handle_key_events(key_event: KeyEvent) -> Option<Command> {
         }
         KeyCode::Char('J') => Some(Command::OpenInFx),
         KeyCode::Char('b') => Some(Command::OpenInBat),
+        KeyCode::Char('o') => Some(Command::OpenInEditor),
         KeyCode::Down => Some(Command::TableFocusDelta(1)),
         KeyCode::Up => Some(Command::TableFocusDelta(-1)),
         KeyCode::Char('d') => Some(Command::TableFocusDelta(3)),
