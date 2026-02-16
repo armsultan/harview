@@ -1,12 +1,5 @@
 use crate::app::{ActiveFocus, App, CookieInfo, HeaderInfo, TabBarState, TableItem};
-use crate::har::Har;
 use ratatui::{prelude::*, widgets::*};
-use syntect::{
-    easy::HighlightLines,
-    highlighting::{Style as SyntectStyle, ThemeSet},
-    parsing::SyntaxSet,
-    util::LinesWithEndings,
-};
 
 pub fn render(app: &mut App, frame: &mut Frame) {
     let main_layout = Layout::default()
@@ -22,6 +15,7 @@ pub fn render_table(app: &mut App, area: Rect, buf: &mut Buffer) {
     let table = EntriesTable::init(app);
     let mut state = TableState::default();
     state.select(Some(app.get_index()));
+    *state.offset_mut() = app.table_offset;
     table.render(area, buf, &mut state);
 }
 
@@ -31,19 +25,19 @@ pub fn render_preview(app: &mut App, area: Rect, buf: &mut Buffer) {
 }
 
 #[derive(Debug)]
-pub struct EntriesTable {
-    table_items: Vec<TableItem>,
+pub struct EntriesTable<'a> {
+    table_items: &'a [TableItem],
     active_focus: ActiveFocus,
 }
 
-impl EntriesTable {
-    pub fn init(app: &App) -> Self {
+impl<'a> EntriesTable<'a> {
+    pub fn init(app: &'a App) -> Self {
         let mut state = TableState::default();
         let index = app.get_index();
         state.select(Some(index));
 
         Self {
-            table_items: app.har.to_table_items(),
+            table_items: &app.table_items,
             active_focus: app.active_focus,
         }
     }
@@ -92,7 +86,7 @@ impl EntriesTable {
     }
 }
 
-impl StatefulWidget for EntriesTable {
+impl<'a> StatefulWidget for EntriesTable<'a> {
     type State = TableState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
@@ -173,7 +167,7 @@ struct HeaderPreview {
 impl HeaderPreview {
     pub fn init(app: &App) -> Self {
         Self {
-            header_info: app.har.to_header_info(app.get_index()),
+            header_info: app.to_header_info(app.get_index()),
             scroll: app.scroll,
             active_focus: app.active_focus,
         }
@@ -186,35 +180,35 @@ impl Widget for HeaderPreview {
         Self: Sized,
     {
         if let Some(header_info) = self.header_info {
-            let mut lines = vec![];
-
-            // General Info
-            lines.push(Line::from(vec![Span::styled(
-                "General",
-                Style::default().bold().underlined(),
-            )]));
-            lines.push(Line::from(vec![
-                Span::raw("Request URL: "),
-                Span::styled(
-                    header_info.url.to_string(),
-                    Style::default().fg(Color::Cyan),
-                ),
-            ]));
-            lines.push(Line::from(vec![
-                Span::raw("Request Method: "),
-                Span::styled(
-                    header_info.method.clone(),
-                    Style::default().fg(Color::Yellow),
-                ),
-            ]));
-            lines.push(Line::from(vec![
-                Span::raw("Status Code: "),
-                Span::styled(
-                    header_info.status.to_string(),
-                    Style::default().fg(Color::Green),
-                ),
-            ]));
-            lines.push(Line::from(""));
+            let mut lines = vec![
+                // General Info
+                Line::from(vec![Span::styled(
+                    "General",
+                    Style::default().bold().underlined(),
+                )]),
+                Line::from(vec![
+                    Span::raw("Request URL: "),
+                    Span::styled(
+                        header_info.url.to_string(),
+                        Style::default().fg(Color::Cyan),
+                    ),
+                ]),
+                Line::from(vec![
+                    Span::raw("Request Method: "),
+                    Span::styled(
+                        header_info.method.clone(),
+                        Style::default().fg(Color::Yellow),
+                    ),
+                ]),
+                Line::from(vec![
+                    Span::raw("Status Code: "),
+                    Span::styled(
+                        header_info.status.to_string(),
+                        Style::default().fg(Color::Green),
+                    ),
+                ]),
+                Line::from(""),
+            ];
 
             // Request Headers
             lines.push(Line::from(vec![Span::styled(
@@ -269,7 +263,7 @@ pub struct CookiePreview {
 impl CookiePreview {
     pub fn init(app: &App) -> Self {
         Self {
-            cookie_info: Har::to_cookie_info(&app.har, app.get_index()),
+            cookie_info: app.to_cookie_info(app.get_index()),
             scroll: app.scroll,
             active_focus: app.active_focus,
         }
@@ -331,35 +325,50 @@ impl Widget for CookiePreview {
     }
 }
 
-pub struct RequestPreview {
-    body: Option<String>,
-    mime_type: String,
+pub struct RequestPreview<'a> {
+    app: &'a App,
     scroll: u16,
     active_focus: ActiveFocus,
 }
 
-impl RequestPreview {
-    pub fn init(app: &App) -> Self {
-        let table_item = app.har.to_table_items();
-        let item = table_item
-            .get(app.get_index())
-            .expect("index out of bounds");
+impl<'a> RequestPreview<'a> {
+    pub fn init(app: &'a App) -> Self {
         Self {
-            body: app.har.to_request_body(app.get_index()),
-            mime_type: item.mime_type.clone(),
+            app,
             scroll: app.scroll,
             active_focus: app.active_focus,
         }
     }
 }
 
-impl Widget for RequestPreview {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        let text = self.body.unwrap_or_else(|| "No request body".to_string());
+impl<'a> Widget for RequestPreview<'a> {
 
-        let highlighted_text = syntax_highlight(&text, &self.mime_type);
 
-        let paragraph = Paragraph::new(highlighted_text)
+    fn render(self, area: Rect, buf: &mut Buffer)
+    where
+        Self: Sized,
+    {
+        // View Slicing Optimization:
+        // Instead of cloning the entire text, we only clone the lines that are currently visible.
+        let text = if let Some(cached) = &self.app.cached_preview_text {
+            let start = self.scroll as usize;
+            let height = area.height as usize;
+            if start >= cached.lines.len() {
+                Text::default()
+            } else {
+                let lines: Vec<Line> = cached.lines
+                    .iter()
+                    .skip(start)
+                    .take(height)
+                    .cloned()
+                    .collect();
+                Text::from(lines)
+            }
+        } else {
+            Text::raw("Loading or No Body...")
+        };
+
+        let paragraph = Paragraph::new(text)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
@@ -371,40 +380,50 @@ impl Widget for RequestPreview {
                     }),
             )
             .wrap(Wrap { trim: false })
-            .scroll((self.scroll, 0));
+            .scroll((0, 0)); // We handled scrolling manually
         Widget::render(paragraph, area, buf);
     }
+
 }
 
-pub struct ResponsePreview {
-    body: Option<String>,
-    mime_type: String,
+pub struct ResponsePreview<'a> {
+    app: &'a App,
     scroll: u16,
     active_focus: ActiveFocus,
 }
 
-impl ResponsePreview {
-    pub fn init(app: &App) -> Self {
-        let table_item = app.har.to_table_items();
-        let item = table_item
-            .get(app.get_index())
-            .expect("index out of bounds");
+impl<'a> ResponsePreview<'a> {
+    pub fn init(app: &'a App) -> Self {
         Self {
-            body: app.har.to_response_body(app.get_index()),
-            mime_type: item.mime_type.clone(),
+            app,
             scroll: app.scroll,
             active_focus: app.active_focus,
         }
     }
 }
 
-impl Widget for ResponsePreview {
+impl<'a> Widget for ResponsePreview<'a> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let text = self.body.unwrap_or_else(|| "No response body".to_string());
+        // View Slicing Optimization:
+        let text = if let Some(cached) = &self.app.cached_preview_text {
+            let start = self.scroll as usize;
+            let height = area.height as usize;
+            if start >= cached.lines.len() {
+                Text::default()
+            } else {
+                let lines: Vec<Line> = cached.lines
+                    .iter()
+                    .skip(start)
+                    .take(height)
+                    .cloned()
+                    .collect();
+                Text::from(lines)
+            }
+        } else {
+            Text::raw("Loading or No Response Body...")
+        };
 
-        let highlighted_text = syntax_highlight(&text, &self.mime_type);
-
-        let paragraph = Paragraph::new(highlighted_text)
+        let paragraph = Paragraph::new(text)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
@@ -415,60 +434,11 @@ impl Widget for ResponsePreview {
                         Style::default().fg(Color::DarkGray)
                     }),
             )
-            .wrap(Wrap { trim: false })
-            .scroll((self.scroll, 0));
+            .scroll((0, 0)) // We handled scrolling manually
+            .wrap(Wrap { trim: false });
         Widget::render(paragraph, area, buf);
     }
 }
 
-fn syntax_highlight(text: &str, mime_type: &str) -> Text<'static> {
-    let ps = SyntaxSet::load_defaults_newlines();
-    let ts = ThemeSet::load_defaults();
-    let mime_type = mime_type.to_lowercase();
 
-    // Try to format as JSON first if it looks like JSON or MIME matches
-    let json_parsed = serde_json::from_str::<serde_json::Value>(text);
-    let is_json = json_parsed.is_ok();
-
-    let syntax = if mime_type.contains("json") || is_json {
-        ps.find_syntax_by_extension("json").unwrap()
-    } else if mime_type.contains("xml") {
-        ps.find_syntax_by_extension("xml").unwrap()
-    } else if mime_type.contains("html") {
-        ps.find_syntax_by_extension("html").unwrap()
-    } else if mime_type.contains("javascript") || mime_type.contains("js") {
-        ps.find_syntax_by_extension("js").unwrap()
-    } else if mime_type.contains("css") {
-        ps.find_syntax_by_extension("css").unwrap()
-    } else {
-        ps.find_syntax_plain_text()
-    };
-
-    let formatted_text = if mime_type.contains("json") || is_json {
-        json_parsed
-            .and_then(|v| serde_json::to_string_pretty(&v))
-            .unwrap_or_else(|_| text.to_string())
-    } else if mime_type.contains("xml") {
-        prettyish_html::prettify(text)
-    } else {
-        text.to_string()
-    };
-
-    let mut highlighter = HighlightLines::new(syntax, &ts.themes["base16-ocean.dark"]);
-    let mut lines = Vec::new();
-
-    for line in LinesWithEndings::from(&formatted_text) {
-        let ranges: Vec<(SyntectStyle, &str)> =
-            highlighter.highlight_line(line, &ps).unwrap_or_default();
-        let spans: Vec<Span> = ranges
-            .into_iter()
-            .map(|(style, content)| {
-                let fg = Color::Rgb(style.foreground.r, style.foreground.g, style.foreground.b);
-                Span::styled(content.to_string(), Style::default().fg(fg))
-            })
-            .collect();
-        lines.push(ratatui::text::Line::from(spans));
-    }
-
-    Text::from(lines)
-}
+// syntax_highlight removed, moved to app.rs

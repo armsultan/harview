@@ -62,8 +62,8 @@ pub struct Page {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PageTimings {
-    pub on_content_load: i64,
-    pub on_load: i64,
+    pub on_content_load: Option<f64>,
+    pub on_load: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -86,7 +86,7 @@ pub struct Entry {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Request {
-    pub body_size: i64,
+    pub body_size: Option<i64>,
     pub method: String,
     #[serde(deserialize_with = "deserialize_url")]
     pub url: url::Url,
@@ -94,7 +94,7 @@ pub struct Request {
     pub headers: Vec<Header>,
     pub cookies: Vec<Cookie>,
     pub query_string: Vec<QueryString>,
-    pub headers_size: i64,
+    pub headers_size: Option<i64>,
     pub post_data: Option<PostData>,
 }
 
@@ -145,8 +145,8 @@ pub struct Response {
     pub content: Content,
     #[serde(rename = "redirectURL")]
     pub redirect_url: String,
-    pub headers_size: i64,
-    pub body_size: i64,
+    pub headers_size: Option<i64>,
+    pub body_size: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -173,3 +173,4 @@ pub struct Timings {
     pub wait: Option<f64>,
     pub receive: Option<f64>,
 }
+

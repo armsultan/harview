@@ -47,11 +47,11 @@ cd harview
 cargo install --path .
 ```
 
-### Optional: Install `fx` for JSON Inspection
+### Prerequisites
 
-```sh
-npm install -g fx
-```
+- Rust (cargo)
+- `fx` (optional, for JSON viewing): `npm install -g fx` or via package manager.
+- `bat` (optional, for enhanced text viewing): `brew install bat` or equivalent.
 
 ## Usage
 
@@ -80,8 +80,10 @@ harview path/to/file.har
 | `Shift+↓` / `PageDown` | Scroll details pane down |
 | `Shift+↑` / `PageUp` | Scroll details pane up |
 | `1` – `4` | Switch to tab (Headers, Cookies, Request, Response) |
-| `←` / `→` | Cycle through tabs |
-| `J` | Open JSON body in `fx` |
+| `Left` / `Right` | Navigate Tabs (Headers, Cookies, Request, Response) |
+| `h` | Toggle Syntax Highlighting (Performance mode) |
+| `J` | Open JSON in `fx` (External viewer) |
+| `b` | Open Body in `bat` (External viewer) |
 | `q` / `Ctrl+C` | Quit |
 
 ### Mouse

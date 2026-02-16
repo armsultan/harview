@@ -13,8 +13,12 @@ pub enum Command {
     PageUp,
     PageDown,
     OpenInFx,
+    OpenInBat,
     TabNext,
     TabPrev,
+
+    ToggleSyntaxHighlighting,
+    SetTableIndex(usize),
 }
 
 impl Command {
@@ -24,14 +28,26 @@ impl Command {
             Self::TableFocusTop => app.update_index_first(),
             Self::TableFocusBottom => app.update_index_last(),
             Self::TableFocusDelta(count) => app.update_index(*count),
-            Self::SetTabBarState(state) => app.set_tabbar_state(state),
+            Self::SetTabBarState(state) => app.set_tabbar_state(*state),
             Self::ScrollUp => app.on_up(),
             Self::ScrollDown => app.on_down(),
             Self::PageUp => app.on_page_up(),
             Self::PageDown => app.on_page_down(),
-            Self::OpenInFx => app.open_in_fx(),
+            Self::OpenInFx => {
+                if let Err(e) = app.open_in_fx() {
+                    eprintln!("Error opening fx: {}", e);
+                }
+            },
+            Self::OpenInBat => {
+                if let Err(e) = app.open_in_bat() {
+                    eprintln!("Error opening bat: {}", e);
+                }
+            },
             Self::TabNext => app.next_tab(),
             Self::TabPrev => app.prev_tab(),
+
+            Self::ToggleSyntaxHighlighting => app.toggle_syntax_highlighting(),
+            Self::SetTableIndex(index) => app.update_index_absolute(*index),
         }
     }
 }
@@ -53,6 +69,7 @@ pub fn handle_key_events(key_event: KeyEvent) -> Option<Command> {
             Some(Command::ScrollDown)
         }
         KeyCode::Char('J') => Some(Command::OpenInFx),
+        KeyCode::Char('b') => Some(Command::OpenInBat),
         KeyCode::Down => Some(Command::TableFocusDelta(1)),
         KeyCode::Up => Some(Command::TableFocusDelta(-1)),
         KeyCode::Char('d') => Some(Command::TableFocusDelta(3)),
@@ -67,6 +84,7 @@ pub fn handle_key_events(key_event: KeyEvent) -> Option<Command> {
         KeyCode::Left => Some(Command::TabPrev),
         KeyCode::PageUp => Some(Command::PageUp),
         KeyCode::PageDown => Some(Command::PageDown),
+        KeyCode::Char('h') => Some(Command::ToggleSyntaxHighlighting),
         _ => None,
     }
 }
@@ -103,7 +121,8 @@ pub fn handle_mouse_events(app: &mut app::App, mouse_event: MouseEvent) -> Optio
             // layout[1] is split into tabbar (1 line) and content.
             // So tab bar is at split_y.
 
-            if mouse_event.row == split_y {
+            // Relaxed check for split_y to account for potential layout rounding differences
+            if mouse_event.row >= split_y.saturating_sub(1) && mouse_event.row <= split_y + 1 {
                 // Approximate tab widths: " [1] Headers " is 13 chars.
                 // Padding 1 space each side.
                 // 0-14: Headers
@@ -113,15 +132,30 @@ pub fn handle_mouse_events(app: &mut app::App, mouse_event: MouseEvent) -> Optio
                 let x = mouse_event.column;
                 if x < 15 {
                     Some(Command::SetTabBarState(app::TabBarState::Headers))
-                } else if x < 29 {
+                } else if x < 30 {
                     Some(Command::SetTabBarState(app::TabBarState::Cookies))
-                } else if x < 43 {
+                } else if x < 45 {
                     Some(Command::SetTabBarState(app::TabBarState::Request))
-                } else if x < 58 {
+                } else if x < 61 {
                     Some(Command::SetTabBarState(app::TabBarState::Response))
                 } else {
                     None
                 }
+            } else if mouse_event.row < split_y {
+                 // Table Click
+                 // Row 0 is Border, Row 1 is Header.
+                 let header_height = 2; // Border + Header
+                 if mouse_event.row >= header_height {
+                     let clicked_row = (mouse_event.row - header_height) as usize;
+                     let target_index = app.table_offset + clicked_row;
+                     if target_index < app.table_items.len() {
+                         Some(Command::SetTableIndex(target_index))
+                     } else {
+                         None
+                     }
+                 } else {
+                     None
+                 }
             } else {
                 None
             }

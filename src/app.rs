@@ -1,12 +1,22 @@
 use base64::prelude::*;
+use chrono;
 use crossterm::{
+    event::{DisableMouseCapture, EnableMouseCapture},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{prelude::*, widgets::*};
 use std::io::Write;
 use std::process::Command;
-use tempfile::NamedTempFile;
+use syntect::{
+    easy::HighlightLines,
+    highlighting::{Style as SyntectStyle, ThemeSet},
+    parsing::SyntaxSet,
+    util::LinesWithEndings,
+};
+use tempfile::{Builder, NamedTempFile};
+
+use crate::har::Har;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActiveFocus {
@@ -14,22 +24,82 @@ pub enum ActiveFocus {
     Preview,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
+pub enum TabBarState {
+    Headers,
+    Cookies,
+    Request,
+    Response,
+}
+
+impl std::fmt::Display for TabBarState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Self::Headers => " [1] Headers ",
+            Self::Cookies => " [2] Cookies ",
+            Self::Request => " [3] Request ",
+            Self::Response => " [4] Response ",
+
+        };
+        write!(f, "{}", s)
+    }
+}
+
+impl TabBarState {
+    pub fn next(&self) -> Self {
+        match self {
+            Self::Headers => Self::Cookies,
+            Self::Cookies => Self::Request,
+            Self::Request => Self::Response,
+            Self::Response => Self::Headers,
+
+        }
+    }
+
+    pub fn prev(&self) -> Self {
+        match self {
+            Self::Headers => Self::Response,
+            Self::Cookies => Self::Headers,
+            Self::Request => Self::Cookies,
+            Self::Response => Self::Request,
+
+        }
+    }
+
+    pub fn to_index(&self) -> usize {
+        match self {
+            Self::Headers => 0,
+            Self::Cookies => 1,
+            Self::Request => 2,
+            Self::Response => 3,
+
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct App {
     pub running: bool,
     index: usize,
     pub har: Har,
-    //pub preview_widget_state: PreviewWidetState,
     pub tabbar_state: TabBarState,
     pub scroll: u16,
     pub should_redraw: bool,
     pub window_size: Rect,
     pub active_focus: ActiveFocus,
+    // Caching for performance
+    pub cached_preview_text: Option<Text<'static>>,
+    pub cached_key: Option<(usize, TabBarState)>,
+    // Caching table items
+    pub table_items: Vec<TableItem>,
+    pub enable_syntax_highlighting: bool,
+    // Add manual offset for table
+    pub table_offset: usize,
 }
 
 impl App {
     pub fn init(har: Har) -> Self {
-        Self {
+        let mut app = Self {
             running: true,
             index: 0,
             tabbar_state: TabBarState::Headers,
@@ -38,7 +108,14 @@ impl App {
             should_redraw: false,
             window_size: Rect::default(),
             active_focus: ActiveFocus::Table,
-        }
+            cached_preview_text: None,
+            cached_key: None,
+            table_items: Vec::new(),
+            enable_syntax_highlighting: true,
+            table_offset: 0,
+        };
+        app.table_items = app.generate_table_items();
+        app
     }
 
     pub fn tick(&self) {}
@@ -49,6 +126,24 @@ impl App {
 
     pub fn max_index(&self) -> usize {
         self.har.log.entries.len()
+    }
+
+    pub fn get_table_height(&self) -> usize {
+        let area_height = self.window_size.height / 2;
+        if area_height > 3 {
+            (area_height - 3) as usize
+        } else {
+            1
+        }
+    }
+
+    fn ensure_visible(&mut self) {
+        let table_height = self.get_table_height();
+        if self.index < self.table_offset {
+            self.table_offset = self.index;
+        } else if self.index >= self.table_offset + table_height {
+            self.table_offset = self.index - table_height + 1;
+        }
     }
 
     pub fn update_index(&mut self, delta: i32) {
@@ -62,15 +157,31 @@ impl App {
             added as usize
         };
         self.scroll = 0;
+        self.cached_preview_text = None; // Invalidate cache on index change
+        self.ensure_visible();
     }
+
+    pub fn update_index_absolute(&mut self, index: usize) {
+        if index < self.max_index() {
+            self.index = index;
+            self.scroll = 0;
+            self.cached_preview_text = None; // Invalidate cache on index change
+            self.ensure_visible();
+        }
+    }
+
     pub fn update_index_first(&mut self) {
         self.index = 0;
         self.scroll = 0;
+        self.cached_preview_text = None; // Invalidate cache
+        self.ensure_visible();
     }
 
     pub fn update_index_last(&mut self) {
         self.index = self.har.log.entries.len() - 1;
         self.scroll = 0;
+        self.cached_preview_text = None; // Invalidate cache
+        self.ensure_visible();
     }
 
     pub fn on_up(&mut self) {
@@ -96,343 +207,393 @@ impl App {
     }
 
     pub fn next_tab(&mut self) {
-        let current_index = self.tabbar_state.to_index();
-        let next_index = (current_index + 1) % 4;
-        self.tabbar_state = TabBarState::from_index(next_index).unwrap();
+        self.tabbar_state = self.tabbar_state.next();
         self.scroll = 0;
+        self.cached_preview_text = None; // Invalidate cache on tab change
     }
 
     pub fn prev_tab(&mut self) {
-        let current_index = self.tabbar_state.to_index();
-        let prev_index = if current_index == 0 {
-            3
-        } else {
-            current_index - 1
-        };
-        self.tabbar_state = TabBarState::from_index(prev_index).unwrap();
+        self.tabbar_state = self.tabbar_state.prev();
         self.scroll = 0;
-    }
-
-    //pub fn set_preview_widget_state(&mut self, state: &PreviewWidetState) {
-    //    self.preview_widget_state = state.clone();
-    //}
-    pub fn set_tabbar_state(&mut self, state: &TabBarState) {
-        self.tabbar_state = state.clone();
-        self.scroll = 0;
-    }
-
-    pub fn open_in_fx(&mut self) {
-        let body = match self.tabbar_state {
-            TabBarState::Request => self.har.to_request_body(self.get_index()),
-            TabBarState::Response => self.har.to_response_body(self.get_index()),
-            _ => None,
-        };
-
-        if let Some(content) = body {
-            // Suspend TUI
-            // Suspend TUI
-            disable_raw_mode().unwrap();
-            execute!(std::io::stderr(), LeaveAlternateScreen).unwrap();
-
-            // Write content to temp file
-            let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
-            write!(temp_file, "{}", content).expect("Failed to write to temp file");
-            temp_file.flush().expect("Failed to flush temp file");
-            let temp_path = temp_file.path().to_owned();
-
-            println!("Opening fx with {}...", temp_path.display());
-
-            // Run fx with file path
-            let mut child = Command::new("fx")
-                .arg(temp_path)
-                .spawn()
-                .expect("Failed to start fx");
-
-            let _ = child.wait();
-
-            // Restore TUI
-            // Restore TUI
-            execute!(std::io::stderr(), EnterAlternateScreen).unwrap();
-            enable_raw_mode().unwrap();
-            self.should_redraw = true;
-        }
+        self.cached_preview_text = None; // Invalidate cache on tab change
     }
 
     pub fn quit(&mut self) {
         self.running = false;
     }
-}
 
-type Har = crate::Har;
+    pub fn open_in_fx(&mut self) -> anyhow::Result<()> {
+        let entry = &self.har.log.entries[self.index];
+        let (body, is_json) = match self.tabbar_state {
+            TabBarState::Request => {
+                let text = entry.request.post_data.as_ref().map(|p| p.text.clone()).unwrap_or_default();
+                let mime = entry.request.post_data.as_ref().map(|p| p.mime_type.clone()).unwrap_or_default();
+                (text, mime.contains("json"))
+            }
+            TabBarState::Response => {
+                 let text = self.to_response_body(self.index).unwrap_or_else(|| "No response body".to_string());
+                 let mime = entry.response.content.mime_type.clone().unwrap_or_default();
+                 (text, mime.contains("json"))
+            }
+            _ => return Ok(()),
+        };
 
-impl Har {
-    pub fn to_table_items(&self) -> Vec<TableItem> {
-        self.log
+        let is_json_heuristic = !is_json && !body.trim_start().starts_with('{') && !body.trim_start().starts_with('[');
+        if is_json_heuristic {
+            return Ok(());
+        }
+
+        let mut temp_file = NamedTempFile::new()?;
+        write!(temp_file, "{}", body)?;
+        temp_file.flush()?; 
+
+        // Temporarily suspend TUI
+        execute!(std::io::stderr(), LeaveAlternateScreen, DisableMouseCapture)?;
+        disable_raw_mode()?;
+
+        let status = Command::new("fx")
+            .arg(temp_file.path())
+            .status();
+
+        // Resume TUI
+        enable_raw_mode()?;
+        execute!(std::io::stderr(), EnterAlternateScreen, EnableMouseCapture)?;
+        
+        // Force a full redraw
+        self.should_redraw = true; 
+
+        if let Err(e) = status {
+             // Handle error (maybe log it or show a message)
+             eprintln!("Failed to open fx: {}", e);
+        }
+
+        Ok(())
+    }
+
+    pub fn open_in_bat(&mut self) -> anyhow::Result<()> {
+        let entry = &self.har.log.entries[self.index];
+        let (body, mime) = match self.tabbar_state {
+            TabBarState::Request => {
+                let text = entry.request.post_data.as_ref().map(|p| p.text.clone()).unwrap_or_default();
+                let mime = entry.request.post_data.as_ref().map(|p| p.mime_type.clone()).unwrap_or_default();
+                (text, mime)
+            }
+            TabBarState::Response => {
+                 let text = self.to_response_body(self.index).unwrap_or_else(|| "No response body".to_string());
+                 let mime = entry.response.content.mime_type.clone().unwrap_or_default();
+                 (text, mime)
+            }
+            _ => return Ok(()),
+        };
+
+        let extension = if mime.contains("json") {
+            "json"
+        } else if mime.contains("html") {
+            "html"
+        } else if mime.contains("javascript") || mime.contains("js") {
+            "js"
+        } else if mime.contains("css") {
+            "css"
+        } else if mime.contains("xml") {
+            "xml"
+        } else {
+            "txt"
+        };
+
+        let mut temp_file = Builder::new()
+            .suffix(&format!(".{}", extension))
+            .tempfile()?;
+            
+        write!(temp_file, "{}", body)?;
+        temp_file.flush()?;
+
+        // Temporarily suspend TUI
+        execute!(std::io::stderr(), LeaveAlternateScreen, DisableMouseCapture)?;
+        disable_raw_mode()?;
+
+        let status = Command::new("bat")
+            .arg(temp_file.path())
+            .status();
+
+        // Resume TUI
+        enable_raw_mode()?;
+        execute!(std::io::stderr(), EnterAlternateScreen, EnableMouseCapture)?;
+        
+        // Force a full redraw
+        self.should_redraw = true; 
+
+        if let Err(e) = status {
+             eprintln!("Failed to open bat: {}", e);
+        }
+
+        Ok(())
+    }
+
+
+    pub fn get_preview_text(&mut self) -> &Text<'static> {
+        // If cache is valid for current index and tab, return it (but we can't return reference to self field if we just mutated it)
+        // Rust borrow checker issue: can't return ref to field while borrowing self mutably.
+        // We need to check validity first, update if needed, then return ref.
+        
+        let key = (self.index, self.tabbar_state);
+        if self.cached_key == Some(key) && self.cached_preview_text.is_some() {
+             return self.cached_preview_text.as_ref().unwrap();
+        }
+
+        // Cache miss or invalid, regenerate
+        let text_content: String;
+        let mime_type: String;
+
+        match self.tabbar_state {
+            TabBarState::Request => {
+                 let entry = &self.har.log.entries[self.index];
+                 text_content = entry.request.post_data.as_ref().map(|p| p.text.clone()).unwrap_or_else(|| "No request body".to_string());
+                 mime_type = entry.request.post_data.as_ref().map(|p| p.mime_type.clone()).unwrap_or_default();
+            },
+            TabBarState::Response => {
+                 text_content = self.to_response_body(self.index).unwrap_or_else(|| "No response body".to_string());
+                 let entry = &self.har.log.entries[self.index];
+                 mime_type = entry.response.content.mime_type.clone().unwrap_or_default();
+            },
+            _ => {
+                // For Headers/Cookies, we don't use this text cache (they differ in structure), 
+                // effectively this function shouldn't be called or returns empty.
+                // But for safety, return empty.
+                text_content = String::new();
+                mime_type = String::new();
+            }
+        }
+
+        if self.enable_syntax_highlighting {
+            let highlighted = syntax_highlight(&text_content, &mime_type);
+            self.cached_preview_text = Some(highlighted);
+        } else {
+             self.cached_preview_text = Some(Text::from(text_content));
+        }
+        self.cached_key = Some(key);
+
+        self.cached_preview_text.as_ref().unwrap()
+    }
+    
+    pub fn toggle_syntax_highlighting(&mut self) {
+        self.enable_syntax_highlighting = !self.enable_syntax_highlighting;
+        self.cached_preview_text = None; // Invalidate cache
+    }
+
+    pub fn set_tabbar_state(&mut self, state: TabBarState) {
+        self.tabbar_state = state;
+        self.scroll = 0;
+        self.cached_preview_text = None;
+    }
+
+    pub fn generate_table_items(&self) -> Vec<TableItem> {
+        self.har.log
             .entries
             .iter()
             .map(|entry| {
-                let result = url::Url::parse(entry.request.url.as_str());
+                let url = entry.request.url.as_str().to_string();
+                let path = entry.request.url.path();
+                let filename = path.split('/').last().unwrap_or(path).to_string();
+                let mime_type = entry.response.content.mime_type.clone().unwrap_or_default();
+                let status = entry.response.status as u16;
+
+                let size = if let Some(s) = entry.response.content.size {
+                    if s < 0 {
+                         "0 B".to_string()
+                    } else {
+                        byte_unit::Byte::from_u64(s as u64)
+                            .get_appropriate_unit(byte_unit::UnitType::Decimal)
+                            .to_string()
+                    }
+                } else {
+                     "0 B".to_string()
+                };
+                
+                let timestamp = chrono::DateTime::parse_from_rfc3339(&entry.started_date_time)
+                     .map(|dt| dt.format("%H:%M:%S%.3f").to_string())
+                     .unwrap_or_else(|_| "".to_string());
 
                 TableItem {
-                    status: entry.response.status as u16,
+                    status,
                     method: entry.request.method.clone(),
-                    domain: {
-                        match result {
-                            Ok(ref url) => url.domain().unwrap_or("").to_string(),
-                            Err(_) => "".to_string(),
-                        }
-                    },
-                    file_name: {
-                        match result {
-                            Ok(ref url) => url.path().to_string(),
-                            Err(_) => "".to_string(),
-                        }
-                    },
-                    mime_type: entry
-                        .response
-                        .content
-                        .mime_type
-                        .clone()
-                        .unwrap_or("".to_string()),
-                    size: entry.response.content.size,
-                    timestamp: entry.started_date_time.clone(),
+                    url,
+                    filename,
+                    mime_type,
+                    total_size: size,
+                    timestamp,
                 }
             })
             .collect()
     }
 
     pub fn to_header_info(&self, index: usize) -> Option<HeaderInfo> {
-        if let Some(entry) = self.log.entries.get(index) {
-            return Some(HeaderInfo {
-                status: entry.response.status,
-                method: entry.request.method.clone(),
-                http_version: entry.request.http_version.clone(),
-                url: entry.request.url.clone(),
-                referrer_policy: entry
-                    .request
-                    .headers
-                    .iter()
-                    .filter(|header| header.name.eq_ignore_ascii_case("Referrer-Policy"))
-                    .map(|header| header.value.clone())
-                    .next(),
-                query_params: entry
-                    .request
-                    .query_string
-                    .iter()
-                    .map(|query| (query.name.clone(), query.value.clone()))
-                    .collect(),
-                req_headers: entry
-                    .request
-                    .headers
-                    .iter()
-                    .map(|header| (header.name.clone(), header.value.clone()))
-                    .collect(),
-                resp_headers: entry
-                    .response
-                    .headers
-                    .iter()
-                    .map(|header| (header.name.clone(), header.value.clone()))
-                    .collect(),
-            });
-        }
+        let entry = self.har.log.entries.get(index)?;
 
-        None
+        let req_headers = entry
+            .request
+            .headers
+            .iter()
+            .map(|h| (h.name.clone(), h.value.clone()))
+            .collect();
+        let resp_headers = entry
+            .response
+            .headers
+            .iter()
+            .map(|h| (h.name.clone(), h.value.clone()))
+            .collect();
+
+        Some(HeaderInfo {
+            url: entry.request.url.to_string(),
+            method: entry.request.method.clone(),
+            status: entry.response.status,
+            req_headers,
+            resp_headers,
+        })
     }
 
-    pub fn to_cookie_info(har: &Har, index: usize) -> Option<CookieInfo> {
-        if let Some(entry) = har.log.entries.get(index) {
-            return Some(CookieInfo {
-                req_cookies: entry
-                    .request
-                    .cookies
-                    .iter()
-                    .map(|cookie| (cookie.name.clone(), cookie.value.clone()))
-                    .collect(),
-                resp_cookies: entry
-                    .response
-                    .cookies
-                    .iter()
-                    .map(|cookie| (cookie.name.clone(), cookie.value.clone()))
-                    .collect(),
-            });
-        }
+    pub fn to_cookie_info(&self, index: usize) -> Option<CookieInfo> {
+        let entry = self.har.log.entries.get(index)?;
 
-        None
+        let req_cookies = entry
+            .request
+            .cookies
+            .iter()
+            .map(|c| (c.name.clone(), c.value.clone()))
+            .collect();
+        let resp_cookies = entry
+            .response
+            .cookies
+            .iter()
+            .map(|c| (c.name.clone(), c.value.clone()))
+            .collect();
+
+        Some(CookieInfo {
+            req_cookies,
+            resp_cookies,
+        })
     }
-
+    
     pub fn to_request_body(&self, index: usize) -> Option<String> {
-        if let Some(entry) = self.log.entries.get(index) {
-            if let Some(post_data) = &entry.request.post_data {
-                return Some(post_data.text.clone());
-            }
-        }
-        None
+        let entry = self.har.log.entries.get(index)?;
+        entry.request.post_data.as_ref().map(|p| p.text.clone())
     }
 
     pub fn to_response_body(&self, index: usize) -> Option<String> {
-        if let Some(entry) = self.log.entries.get(index) {
-            if let Some(text) = &entry.response.content.text {
-                if let Some(encoding) = &entry.response.content.encoding {
-                    if encoding.eq_ignore_ascii_case("base64") {
-                        match BASE64_STANDARD.decode(text) {
-                            Ok(decoded) => {
-                                return Some(String::from_utf8_lossy(&decoded).to_string())
-                            }
-                            Err(_) => return Some(format!("Error decoding base64: {}", text)),
-                        }
-                    }
-                }
-                return Some(text.clone());
+        let entry = self.har.log.entries.get(index)?;
+        let content = &entry.response.content;
+
+        if let Some(text) = &content.text {
+            // Handle base64 encoding if necessary
+            if content.encoding.as_deref() == Some("base64") {
+                 use base64::prelude::*;
+                 match BASE64_STANDARD.decode(text) {
+                     Ok(decoded) => Some(String::from_utf8_lossy(&decoded).to_string()),
+                     Err(_) => Some(text.clone()),
+                 }
+            } else {
+                 Some(text.clone())
             }
-        }
-        None
-    }
-}
-#[derive(Debug, Clone)]
-pub enum TabBarState {
-    Headers,
-    Cookies,
-    Request,
-    Response,
-}
-
-impl TabBarState {
-    pub fn from_index(index: usize) -> Option<Self> {
-        match index {
-            0 => Some(Self::Headers),
-            1 => Some(Self::Cookies),
-            2 => Some(Self::Request),
-            3 => Some(Self::Response),
-            _ => None,
-        }
-    }
-
-    pub fn to_index(&self) -> usize {
-        match self {
-            Self::Headers => 0,
-            Self::Cookies => 1,
-            Self::Request => 2,
-            Self::Response => 3,
+        } else {
+            None
         }
     }
 }
-
-impl std::fmt::Display for TabBarState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = match self {
-            Self::Headers => " [1] Headers ",
-            Self::Cookies => " [2] Cookies ",
-            Self::Request => " [3] Request ",
-            Self::Response => " [4] Response ",
-        };
-        write!(f, "{}", s)
-    }
-}
-
-//#[derive(Debug, Clone)]
-//pub enum PreviewWidetState {
-//    Hidden,
-//    Bottom,
-//    Right,
-//    Full,
-//}
 
 #[derive(Debug, Clone)]
 pub struct TableItem {
     pub status: u16,
     pub method: String,
-    pub domain: String,
-    pub file_name: String,
+    pub url: String,
+    pub filename: String,
     pub mime_type: String,
-    pub size: Option<i64>,
+    pub total_size: String,
     pub timestamp: String,
 }
 
 impl TableItem {
-    pub fn to_table_row(&self) -> ratatui::widgets::Row<'static> {
-        let status_span = match self.status {
-            100..=199 => Span::styled(
-                self.status.to_string(),
-                Style::default().fg(Color::LightBlue).bold(),
-            ),
-            200..=299 => Span::styled(
-                self.status.to_string(),
-                Style::default().fg(Color::LightGreen).bold(),
-            ),
-            300..=399 => Span::styled(
-                self.status.to_string(),
-                Style::default().fg(Color::LightCyan).bold(),
-            ),
-            400..=499 => Span::styled(
-                self.status.to_string(),
-                Style::default().fg(Color::LightYellow).bold(),
-            ),
-            500..=599 => Span::styled(
-                self.status.to_string(),
-                Style::default().fg(Color::LightMagenta).bold(),
-            ),
-            0 => Span::styled("---", Style::default().fg(Color::DarkGray).bold()),
-            _ => Span::styled(
-                self.status.to_string(),
-                Style::default().bg(Color::DarkGray),
-            ),
-        };
-
-        let mime_type = self.mime_type.clone();
-        let shorten_mime = match mime_type.as_str().parse::<mime::Mime>() {
-            Ok(m) => m.subtype().to_string(),
-            Err(_) => mime_type,
-        };
-
-        let size_span = match self.size {
-            Some(s) => {
-                let b = byte_unit::Byte::from_u64(s as u64);
-                Span::styled(
-                    format!(
-                        "{:>8.2} {:<2}",
-                        b.get_appropriate_unit(byte_unit::UnitType::Decimal)
-                            .get_value(),
-                        b.get_appropriate_unit(byte_unit::UnitType::Decimal)
-                            .get_unit()
-                    ),
-                    Style::default(),
-                )
-            }
-            None => Span::styled("     --- B", Style::default().fg(Color::DarkGray)),
-        };
-
-        Row::new([
-            Cell::new(status_span),
-            Cell::new(Span::styled(
-                self.method.clone(),
-                Style::default().fg(Color::White).bold(),
-            )),
-            Cell::new(Span::styled(
-                self.domain.clone(),
-                Style::default().fg(Color::White),
-            )),
-            Cell::new(self.file_name.clone()),
-            Cell::new(shorten_mime),
-            Cell::new(size_span),
-            Cell::new(self.timestamp.clone()),
+    pub fn to_table_row(&self) -> Row<'_> {
+        Row::new(vec![
+            Cell::from(self.status.to_string()).style(match self.status {
+                100..=199 => Style::default().fg(Color::LightBlue),
+                200..=299 => Style::default().fg(Color::LightGreen),
+                300..=399 => Style::default().fg(Color::LightCyan),
+                400..=499 => Style::default().fg(Color::LightYellow),
+                500..=599 => Style::default().fg(Color::LightMagenta),
+                _ => Style::default().fg(Color::DarkGray),
+            }),
+            Cell::from(self.method.as_str()).style(Style::default().fg(Color::Yellow)),
+            Cell::from(self.url.as_str()).style(Style::default().fg(Color::LightBlue)),
+            Cell::from(self.filename.as_str()),
+            Cell::from(self.mime_type.as_str()).style(Style::default().fg(Color::Magenta)),
+            Cell::from(self.total_size.as_str()).style(Style::default().fg(Color::LightCyan)),
+            Cell::from(self.timestamp.as_str()),
         ])
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HeaderInfo {
-    pub status: i64,
+    pub url: String,
     pub method: String,
-    pub http_version: String,
-    pub url: url::Url,
-    pub query_params: Vec<(String, String)>,
-    pub referrer_policy: Option<String>,
+    pub status: i64,
     pub req_headers: Vec<(String, String)>,
     pub resp_headers: Vec<(String, String)>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CookieInfo {
     pub req_cookies: Vec<(String, String)>,
     pub resp_cookies: Vec<(String, String)>,
+}
+
+pub fn syntax_highlight(text: &str, mime_type: &str) -> Text<'static> {
+    let ps = SyntaxSet::load_defaults_newlines();
+    let ts = ThemeSet::load_defaults();
+    let mime_type = mime_type.to_lowercase();
+
+    // Try to format as JSON first if it looks like JSON or MIME matches
+    let json_parsed = serde_json::from_str::<serde_json::Value>(text);
+    let is_json = json_parsed.is_ok();
+
+    let syntax = if mime_type.contains("json") || is_json {
+        ps.find_syntax_by_extension("json").unwrap()
+    } else if mime_type.contains("xml") {
+        ps.find_syntax_by_extension("xml").unwrap()
+    } else if mime_type.contains("html") {
+        ps.find_syntax_by_extension("html").unwrap()
+    } else if mime_type.contains("javascript") || mime_type.contains("js") {
+        ps.find_syntax_by_extension("js").unwrap()
+    } else if mime_type.contains("css") {
+        ps.find_syntax_by_extension("css").unwrap()
+    } else {
+        ps.find_syntax_plain_text()
+    };
+
+    let formatted_text = if mime_type.contains("json") || is_json {
+        json_parsed
+            .and_then(|v| serde_json::to_string_pretty(&v))
+            .unwrap_or_else(|_| text.to_string())
+    } else if mime_type.contains("xml") {
+        prettyish_html::prettify(text)
+    } else {
+        text.to_string()
+    };
+
+    let mut highlighter = HighlightLines::new(syntax, &ts.themes["base16-ocean.dark"]);
+    let mut lines = Vec::new();
+
+    for line in LinesWithEndings::from(&formatted_text) {
+        let ranges: Vec<(SyntectStyle, &str)> =
+            highlighter.highlight_line(line, &ps).unwrap_or_default();
+        let spans: Vec<Span> = ranges
+            .into_iter()
+            .map(|(style, content)| {
+                let fg = Color::Rgb(style.foreground.r, style.foreground.g, style.foreground.b);
+                Span::styled(content.to_string(), Style::default().fg(fg))
+            })
+            .collect();
+        lines.push(ratatui::text::Line::from(spans));
+    }
+
+    Text::from(lines)
 }

@@ -46,7 +46,11 @@ pub async fn run(app: &mut app::App) -> anyhow::Result<()> {
     tui.init()?;
     app.window_size = size;
 
-    while app.running {
+    loop {
+        // Ensure cache is populated before drawing
+        // This is where the expensive syntax highlighting happens if needed
+        app.get_preview_text();
+
         tui.draw(app)?;
         match tui.events.next().await? {
             event::Event::Tick => app.tick(),
@@ -64,6 +68,10 @@ pub async fn run(app: &mut app::App) -> anyhow::Result<()> {
                 let size = tui.size()?;
                 app.window_size = size;
             }
+        }
+
+        if !app.running {
+            break;
         }
     }
 
