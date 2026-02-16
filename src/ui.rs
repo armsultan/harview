@@ -124,17 +124,6 @@ impl<'a> PreviewWidget<'a> {
         }
     }
 
-    fn tabbar(&self) -> Tabs<'_> {
-        Tabs::new(vec![
-            " [1] Headers ",
-            " [2] Cookies ",
-            " [3] Request ",
-            " [4] Response ",
-            " [?] Help ",
-        ])
-        .select(self.tabbar_state.to_index())
-        .padding(" ", " ")
-    }
 }
 
 impl<'a> Widget for PreviewWidget<'a> {
@@ -142,14 +131,42 @@ impl<'a> Widget for PreviewWidget<'a> {
     where
         Self: Sized,
     {
-        let tabbar = self.tabbar();
-
         let layout = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(1), Constraint::Fill(1)])
             .split(area);
 
-        Widget::render(tabbar, layout[0], buf);
+        // Split tab bar row: main tabs left, help tab right
+        let tab_row = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Fill(1), Constraint::Length(12)])
+            .split(layout[0]);
+
+        // Main tabs (1-4) — only highlight if current tab is one of these
+        let main_tabs = Tabs::new(vec![
+            " [1] Headers ",
+            " [2] Cookies ",
+            " [3] Request ",
+            " [4] Response ",
+        ])
+        .select(if self.tabbar_state == TabBarState::Help {
+            usize::MAX // nothing selected
+        } else {
+            self.tabbar_state.to_index()
+        })
+        .padding(" ", " ");
+
+        Widget::render(main_tabs, tab_row[0], buf);
+
+        // Help tab — right-aligned, highlighted when active
+        let help_style = if self.tabbar_state == TabBarState::Help {
+            Style::default().reversed()
+        } else {
+            Style::default()
+        };
+        let help_label = Paragraph::new(Span::styled(" [?] Help ", help_style))
+            .alignment(Alignment::Right);
+        Widget::render(help_label, tab_row[1], buf);
 
         match self.tabbar_state {
             TabBarState::Headers => {
