@@ -9,9 +9,7 @@ A fast, lightweight HTTP Archive (HAR) viewer for the terminal, written in Rust.
 [![Rust](https://img.shields.io/badge/rust-stable-orange.svg)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-
-<!-- Add a screenshot or demo GIF here -->
-<!-- ![harview demo](./assets/demo.gif) -->
+![harview demo](./media/demo.gif)
 
 </div>
 
@@ -38,8 +36,7 @@ The top pane displays a sortable list of all entries with the following columns:
 |--------|-------------|
 | Status | HTTP status code (color-coded by class) |
 | Method | HTTP method (GET, POST, etc.) |
-| Domain | Full request URL |
-| FileName | Last path segment of the URL |
+| URL | Full request URL |
 | ContentType | Response MIME type |
 | Size | Response body size |
 | Timestamp | Request start time (`HH:MM:SS.mmm`) |
