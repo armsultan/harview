@@ -658,7 +658,6 @@ fn truncate_line<'a>(line: &'a Line<'a>, max_width: usize) -> Line<'a> {
             let mut new_span = span.clone();
             new_span.content = std::borrow::Cow::Owned(truncated.to_string());
             new_spans.push(new_span);
-            current_width += remaining;
             break;
         }
     }

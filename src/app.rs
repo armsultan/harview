@@ -1,4 +1,3 @@
-use base64::prelude::*;
 use chrono;
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture},
