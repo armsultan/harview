@@ -23,14 +23,15 @@ A fast, lightweight HTTP Archive (HAR) viewer for the terminal, written in Rust.
 
 ### Core Functionality
 - **Split-Pane Interface** — Request list on top, detailed view below
-- **Tab Navigation** — Quickly switch between Headers, Cookies, Request Body, and Response Body
+- **Search & Filter** — Vim-style `/` search with full regex support; filter by URL, host, headers, body, status code, method, size, duration, and more. Matches are highlighted in both the table and the detail pane
+- **Tab Navigation** — Quickly switch between Headers, Cookies, Request, Response, and Help tabs
 - **Syntax Highlighting** — Toggle with `h`. Supports JSON, HTML, XML, JavaScript, and CSS. Automatically skipped for bodies over 200KB to keep the UI responsive — use `b` to open large content in `bat` instead
 - **Pretty Printing** — Auto-formatted JSON and XML/HTML for readability
 - **Base64 Decoding** — Response bodies with base64 encoding are automatically decoded for display
 
 ### Request Table
 
-The top pane displays a sortable list of all entries with the following columns:
+The top pane displays a list of all entries with the following columns:
 
 | Column | Description |
 |--------|-------------|
@@ -62,7 +63,19 @@ External viewers are available on the **Request** and **Response** tabs. They op
 ```sh
 git clone https://github.com/armsultan/harview.git
 cd harview
-cargo install --path .
+cargo install --path . --locked
+```
+
+If needed, add `$HOME/.cargo/bin` to your `PATH` to be able to run the installed binaries
+
+```bash
+#zsh
+echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
+# bash
+echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
+
+# To verify it worked:
+which harview
 ```
 
 ### Prerequisites
@@ -86,6 +99,42 @@ harview path/to/file.har
 ## Controls
 
 ### Keyboard
+
+#### Search & Filter
+
+| Key | Action |
+|-----|--------|
+| `/` | Enter search mode |
+| `Tab` | Cycle search scope (see scopes below) |
+| `Enter` | Confirm filter and return to normal mode |
+| `Esc` (search mode) | Cancel — restores the previous filter state |
+| `Esc` (normal mode) | Clear the active filter |
+
+The search bar appears at the bottom of the request table while active:
+
+```
+/ [ALL] api\.example▏                              47/312
+```
+
+**Search scopes** (cycle with `Tab`):
+
+| Scope | Searches |
+|-------|----------|
+| `ALL` | Every field listed below |
+| `URL` | Full request URL |
+| `Host` | Hostname only |
+| `QueryStr` | Query string parameters (`key=value`) |
+| `ReqHdrs` | Request headers (`Name: Value`) |
+| `RespHdrs` | Response headers |
+| `ReqBody` | Request body |
+| `RespBody` | Response body (base64 decoded automatically) |
+| `Method` | HTTP method (e.g. `GET`, `POST`) |
+| `Status` | HTTP status code (e.g. `404`) |
+| `ReqSize` | Request body size in bytes |
+| `RespSize` | Response body size in bytes |
+| `Duration` | Total request duration in ms |
+
+Regex examples: `^GET`, `4\d{2}`, `application/json`, `api/v[0-9]+`
 
 #### Navigation
 
@@ -142,7 +191,7 @@ harview path/to/file.har
 
 ## Enhancement ideas
 
-- [ ] Search and filter requests
+- [x] Search and filter requests
 - [ ] Export selected entries
 - [ ] Support for additional content types
 - [ ] Configurable color themes

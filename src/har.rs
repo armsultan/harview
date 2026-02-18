@@ -174,3 +174,165 @@ pub struct Timings {
     pub receive: Option<f64>,
 }
 
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const MINIMAL_HAR: &str = r#"{
+        "log": {
+            "version": "1.2",
+            "creator": { "name": "test-tool", "version": "1.0" },
+            "entries": [
+                {
+                    "startedDateTime": "2024-06-01T10:00:00.000Z",
+                    "time": 123.4,
+                    "request": {
+                        "method": "GET",
+                        "url": "https://example.com/api/data?q=hello",
+                        "httpVersion": "HTTP/1.1",
+                        "headers": [
+                            { "name": "Accept", "value": "application/json" }
+                        ],
+                        "cookies": [],
+                        "queryString": [
+                            { "name": "q", "value": "hello" }
+                        ],
+                        "headersSize": -1,
+                        "bodySize": 0
+                    },
+                    "response": {
+                        "status": 200,
+                        "statusText": "OK",
+                        "httpVersion": "HTTP/1.1",
+                        "headers": [
+                            { "name": "Content-Type", "value": "application/json" }
+                        ],
+                        "cookies": [],
+                        "content": {
+                            "size": 27,
+                            "mimeType": "application/json",
+                            "text": "{\"status\":\"ok\",\"count\":42}"
+                        },
+                        "redirectURL": "",
+                        "headersSize": -1,
+                        "bodySize": 27
+                    },
+                    "cache": {},
+                    "timings": {
+                        "send": 1.0,
+                        "wait": 120.0,
+                        "receive": 2.4
+                    }
+                }
+            ]
+        }
+    }"#;
+
+    #[test]
+    fn parse_minimal_har() {
+        let har: Har = serde_json::from_str(MINIMAL_HAR).expect("should parse");
+        assert_eq!(har.log.entries.len(), 1);
+    }
+
+    #[test]
+    fn parse_entry_request_fields() {
+        let har: Har = serde_json::from_str(MINIMAL_HAR).unwrap();
+        let req = &har.log.entries[0].request;
+        assert_eq!(req.method, "GET");
+        assert_eq!(req.url.host_str(), Some("example.com"));
+        assert_eq!(req.url.path(), "/api/data");
+        assert_eq!(req.query_string.len(), 1);
+        assert_eq!(req.query_string[0].name, "q");
+        assert_eq!(req.query_string[0].value, "hello");
+        assert_eq!(req.headers.len(), 1);
+        assert_eq!(req.headers[0].name, "Accept");
+    }
+
+    #[test]
+    fn parse_entry_response_fields() {
+        let har: Har = serde_json::from_str(MINIMAL_HAR).unwrap();
+        let resp = &har.log.entries[0].response;
+        assert_eq!(resp.status, 200);
+        assert_eq!(resp.status_text, "OK");
+        assert_eq!(resp.headers[0].value, "application/json");
+        assert_eq!(resp.content.size, Some(27));
+        assert_eq!(resp.content.text.as_deref(), Some("{\"status\":\"ok\",\"count\":42}"));
+        assert!(resp.content.encoding.is_none());
+    }
+
+    #[test]
+    fn parse_entry_timing_and_duration() {
+        let har: Har = serde_json::from_str(MINIMAL_HAR).unwrap();
+        let entry = &har.log.entries[0];
+        assert_eq!(entry.time, 123.4);
+        assert_eq!(entry.timings.send, Some(1.0));
+        assert_eq!(entry.timings.wait, Some(120.0));
+        assert_eq!(entry.timings.blocked, None);
+    }
+
+    #[test]
+    fn parse_creator_metadata() {
+        let har: Har = serde_json::from_str(MINIMAL_HAR).unwrap();
+        let creator = har.log.creator.unwrap();
+        assert_eq!(creator.name.as_deref(), Some("test-tool"));
+        assert_eq!(creator.version.as_deref(), Some("1.0"));
+    }
+
+    #[test]
+    fn parse_log_version() {
+        let har: Har = serde_json::from_str(MINIMAL_HAR).unwrap();
+        assert_eq!(har.log.version.as_deref(), Some("1.2"));
+    }
+
+    #[test]
+    fn parse_url_components() {
+        let har: Har = serde_json::from_str(MINIMAL_HAR).unwrap();
+        let url = &har.log.entries[0].request.url;
+        assert_eq!(url.scheme(), "https");
+        assert_eq!(url.host_str(), Some("example.com"));
+        assert_eq!(url.path(), "/api/data");
+        assert!(url.as_str().contains("q=hello"));
+    }
+
+    #[test]
+    fn reject_invalid_url() {
+        let bad = MINIMAL_HAR.replace(
+            "\"url\": \"https://example.com/api/data?q=hello\"",
+            "\"url\": \"not a url at all!!!\"",
+        );
+        let result: Result<Har, _> = serde_json::from_str(&bad);
+        assert!(result.is_err(), "invalid URL should fail to deserialize");
+    }
+
+    #[test]
+    fn parse_empty_entries_list() {
+        let json = r#"{
+            "log": {
+                "entries": []
+            }
+        }"#;
+        let har: Har = serde_json::from_str(json).expect("empty entries should parse");
+        assert_eq!(har.log.entries.len(), 0);
+    }
+
+    #[test]
+    fn parse_base64_encoded_response_body() {
+        use base64::prelude::*;
+        let body = r#"{"secret":"value"}"#;
+        let encoded = BASE64_STANDARD.encode(body);
+        let json = MINIMAL_HAR.replace(
+            "{\"status\":\"ok\",\"count\":42}",
+            &encoded,
+        ).replace(
+            "\"size\": 27",
+            &format!("\"size\": {}, \"encoding\": \"base64\"", encoded.len()),
+        );
+        let har: Har = serde_json::from_str(&json).expect("base64 entry should parse");
+        assert_eq!(
+            har.log.entries[0].response.content.encoding.as_deref(),
+            Some("base64")
+        );
+    }
+}

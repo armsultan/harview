@@ -54,7 +54,7 @@ pub async fn run(app: &mut app::App) -> anyhow::Result<()> {
         let needs_draw = match tui.events.next().await? {
             event::Event::Tick => false, // Ticks don't change state, skip redraw
             event::Event::Key(key_event) => {
-                if let Some(command) = handler::handle_key_events(key_event) {
+                if let Some(command) = handler::handle_key_events(key_event, app) {
                     command.exec(app);
                 }
                 true

@@ -17,9 +17,16 @@ pub enum Command {
     OpenInEditor,
     TabNext,
     TabPrev,
-
     ToggleSyntaxHighlighting,
     SetTableIndex(usize),
+    // Search
+    EnterSearchMode,
+    SearchChar(char),
+    SearchBackspace,
+    SearchConfirm,
+    SearchCancel,
+    SearchCycleScope,
+    ClearSearch,
 }
 
 impl Command {
@@ -36,28 +43,48 @@ impl Command {
             Self::PageDown => app.on_page_down(),
             Self::OpenInFx => {
                 app.pending_action = Some(app::PendingAction::OpenInFx);
-            },
+            }
             Self::OpenInBat => {
                 app.pending_action = Some(app::PendingAction::OpenInBat);
-            },
+            }
             Self::OpenInEditor => {
                 app.pending_action = Some(app::PendingAction::OpenInEditor);
-            },
+            }
             Self::TabNext => app.next_tab(),
             Self::TabPrev => app.prev_tab(),
-
             Self::ToggleSyntaxHighlighting => app.toggle_syntax_highlighting(),
             Self::SetTableIndex(index) => app.update_index_absolute(*index),
+            Self::EnterSearchMode => app.enter_search_mode(),
+            Self::SearchChar(c) => app.push_search_char(*c),
+            Self::SearchBackspace => app.pop_search_char(),
+            Self::SearchConfirm => app.confirm_search(),
+            Self::SearchCancel => app.cancel_search(),
+            Self::SearchCycleScope => app.cycle_search_scope(),
+            Self::ClearSearch => app.clear_search(),
         }
     }
 }
 
-pub fn handle_key_events(key_event: KeyEvent) -> Option<Command> {
+pub fn handle_key_events(key_event: KeyEvent, app: &app::App) -> Option<Command> {
+    // In search mode, most keys are captured for the query input.
+    if app.search_mode {
+        return handle_search_key(key_event);
+    }
+
+    // Normal mode
     match key_event.code {
         KeyCode::Char('q') => Some(Command::Quit),
         KeyCode::Char('c') | KeyCode::Char('C') => {
             if key_event.modifiers == KeyModifiers::CONTROL {
                 Some(Command::Quit)
+            } else {
+                None
+            }
+        }
+        KeyCode::Char('/') => Some(Command::EnterSearchMode),
+        KeyCode::Esc => {
+            if app.search_active {
+                Some(Command::ClearSearch)
             } else {
                 None
             }
@@ -91,6 +118,26 @@ pub fn handle_key_events(key_event: KeyEvent) -> Option<Command> {
     }
 }
 
+fn handle_search_key(key_event: KeyEvent) -> Option<Command> {
+    match key_event.code {
+        KeyCode::Enter => Some(Command::SearchConfirm),
+        KeyCode::Esc => Some(Command::SearchCancel),
+        KeyCode::Tab => Some(Command::SearchCycleScope),
+        KeyCode::Backspace => Some(Command::SearchBackspace),
+        KeyCode::Char(c) => {
+            // Pass through Ctrl+C as quit even in search mode
+            if key_event.modifiers == KeyModifiers::CONTROL && (c == 'c' || c == 'C') {
+                Some(Command::Quit)
+            } else if key_event.modifiers.is_empty() || key_event.modifiers == KeyModifiers::SHIFT {
+                Some(Command::SearchChar(c))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
 pub fn handle_mouse_events(app: &mut app::App, mouse_event: MouseEvent) -> Option<Command> {
     let split_y = app.window_size.height / 2;
 
@@ -117,20 +164,7 @@ pub fn handle_mouse_events(app: &mut app::App, mouse_event: MouseEvent) -> Optio
             }
         }
         MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
-            // Check for Tab Click
-            // Tab bar is at the top of the second pane?
-            // In ui.rs: layout[0] is table, layout[1] is preview.
-            // layout[1] is split into tabbar (1 line) and content.
-            // So tab bar is at split_y.
-
-            // Relaxed check for split_y to account for potential layout rounding differences
             if mouse_event.row >= split_y.saturating_sub(1) && mouse_event.row <= split_y + 1 {
-                // Approximate tab widths: " [1] Headers " is 13 chars.
-                // Padding 1 space each side.
-                // 0-14: Headers
-                // 15-28: Cookies
-                // 29-42: Request
-                // 43-57: Response
                 let x = mouse_event.column;
                 if x < 15 {
                     Some(Command::SetTabBarState(app::TabBarState::Headers))
@@ -146,20 +180,19 @@ pub fn handle_mouse_events(app: &mut app::App, mouse_event: MouseEvent) -> Optio
                     None
                 }
             } else if mouse_event.row < split_y {
-                 // Table Click
-                 // Row 0 is Border, Row 1 is Header.
-                 let header_height = 2; // Border + Header
-                 if mouse_event.row >= header_height {
-                     let clicked_row = (mouse_event.row - header_height) as usize;
-                     let target_index = app.table_offset + clicked_row;
-                     if target_index < app.table_items.len() {
-                         Some(Command::SetTableIndex(target_index))
-                     } else {
-                         None
-                     }
-                 } else {
-                     None
-                 }
+                let header_height = 2; // Border + Header row
+                if mouse_event.row >= header_height {
+                    let clicked_row = (mouse_event.row - header_height) as usize;
+                    let target_index = app.table_offset + clicked_row;
+                    // Bounds check against filtered display list
+                    if target_index < app.display_entry_indices.len() {
+                        Some(Command::SetTableIndex(target_index))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
             } else {
                 None
             }
